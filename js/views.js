@@ -509,6 +509,20 @@ Views._transactionsTrades = function (root, tx, ownerMap, selected) {
         groups[key].items.push(t);
     });
     const heuristicGroups = Object.values(groups).sort((a, b) => (b.season - a.season) || (b.week - a.week));
+    const highGroups = heuristicGroups.filter(g => g.confidence === "high");
+    const lowGroups = heuristicGroups.filter(g => g.confidence !== "high");
+
+    // ---- net trade value per owner: points received minus points given up, summed across every trade ----
+    const netValue = {};
+    function addNet(owner, delta) { netValue[owner] = (netValue[owner] || 0) + delta; }
+    heuristicGroups.forEach(g => {
+        const [ownerA, ownerB] = g.owners;
+        const aTotal = g.items.reduce((s, it) => s + (it.teamA.owner === ownerA ? it.teamA.totalPoints : it.teamB.totalPoints), 0);
+        const bTotal = g.items.reduce((s, it) => s + (it.teamA.owner === ownerB ? it.teamA.totalPoints : it.teamB.totalPoints), 0);
+        addNet(ownerA, aTotal - bTotal);
+        addNet(ownerB, bTotal - aTotal);
+    });
+    const netRows = Object.keys(netValue).map(owner => ({ owner, value: netValue[owner] })).sort((a, b) => b.value - a.value);
 
     function heuristicSide(items, ownerSlug) {
         const total = items.reduce((s, it) => s + (it.teamA.owner === ownerSlug ? it.teamA.totalPoints : it.teamB.totalPoints), 0);
@@ -525,12 +539,12 @@ Views._transactionsTrades = function (root, tx, ownerMap, selected) {
         return `<span class="badge">possible trade — could be coincidental waiver moves</span>`;
     }
 
-    const heuristicCards = heuristicGroups.map(g => {
+    function heuristicCard(g) {
         const [ownerA, ownerB] = g.owners;
         const a = heuristicSide(g.items, ownerA), b = heuristicSide(g.items, ownerB);
         const aWon = a.total > b.total, bWon = b.total > a.total;
         return `<div class="card">
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">S${g.season} W${g.week} &middot; ${confidenceBadge(g.confidence)}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Week ${g.week} &middot; ${confidenceBadge(g.confidence)}</div>
             <div class="grid cols-2">
                 <div>
                     <div style="font-weight:700">${ownerLink(ownerA, ownerMap[ownerA]?.displayName || ownerA)} received ${aWon ? "🏆" : ""}</div>
@@ -544,11 +558,11 @@ Views._transactionsTrades = function (root, tx, ownerMap, selected) {
                 </div>
             </div>
         </div>`;
-    }).join("");
+    }
 
-    const verifiedCards = verified.map(t => {
+    function verifiedCard(t) {
         return `<div class="card">
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">S${t.season} &middot; ${confidenceBadge("verified")}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">${confidenceBadge("verified")}</div>
             <div class="grid cols-2">
                 <div>
                     <div style="font-weight:700">${ownerLink(t.teamA.owner, ownerMap[t.teamA.owner]?.displayName || t.teamA.owner)} received</div>
@@ -560,12 +574,40 @@ Views._transactionsTrades = function (root, tx, ownerMap, selected) {
                 </div>
             </div>
         </div>`;
-    }).join("");
+    }
+
+    // group any list of trade-like records by season, most recent first
+    function bySeasonSections(items, seasonOf, renderFn) {
+        const bySeason = {};
+        items.forEach(it => {
+            const s = seasonOf(it);
+            if (!bySeason[s]) bySeason[s] = [];
+            bySeason[s].push(it);
+        });
+        const seasons = Object.keys(bySeason).map(Number).sort((a, b) => b - a);
+        return seasons.map(s => `
+            <div class="section-title">Season ${s} (${bySeason[s].length})</div>
+            ${bySeason[s].map(renderFn).join("")}
+        `).join("");
+    }
+
+    const netValueHtml = netRows.length ? `
+        <div class="card">
+            <h3>Net Trade Value by Team</h3>
+            <p style="color:var(--text-muted);font-size:13px">Points gained minus points given up, summed across every inferred trade (2023-2025 only &mdash; verified 2026+ trades don't have point totals yet since they're mostly draft picks).</p>
+            ${barChart(netRows, { labelFn: r => ownerMap[r.owner]?.displayName || r.owner, valueFn: r => r.value, formatFn: v => fmt.signed(v) })}
+        </div>` : "";
 
     root.innerHTML = `
-        ${verified.length ? `<div class="section-title">✓ ESPN-Verified Trades (${verified.length})</div>${verifiedCards}` : ""}
-        <div class="section-title">Inferred Trades from Roster History (${heuristicGroups.length})</div>
-        ${heuristicCards || `<p class="empty-state">No trades detected for this filter.</p>`}
+        ${netValueHtml}
+        <h2 style="margin-top:22px">✓ ESPN-Verified Trades (${verified.length})</h2>
+        ${verified.length ? bySeasonSections(verified, t => t.season, verifiedCard) : `<p class="empty-state">None yet for this filter &mdash; only tracked from the 2026 season onward.</p>`}
+
+        <h2 style="margin-top:22px">High-Confidence Trades (${highGroups.length})</h2>
+        ${highGroups.length ? bySeasonSections(highGroups, g => g.season, heuristicCard) : `<p class="empty-state">None for this filter.</p>`}
+
+        <h2 style="margin-top:22px">Possible Trades &mdash; Lower Confidence (${lowGroups.length})</h2>
+        ${lowGroups.length ? bySeasonSections(lowGroups, g => g.season, heuristicCard) : `<p class="empty-state">None for this filter.</p>`}
     `;
 };
 
