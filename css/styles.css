@@ -223,7 +223,6 @@ table.data tbody tr.me { background: color-mix(in srgb, var(--accent) 10%, trans
     transition: transform .12s ease, box-shadow .12s ease;
 }
 .owner-card:hover { transform: translateY(-2px); text-decoration: none; box-shadow: 0 2px 6px rgba(0,0,0,.1), 0 10px 24px rgba(0,0,0,.08); }
-.owner-card .nickname { font-size: 12px; color: var(--accent); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
 .owner-card .name { font-size: 17px; font-weight: 700; margin: 2px 0 8px; color: var(--text); }
 .owner-card .mini-record { font-size: 12.5px; color: var(--text-muted); }
 

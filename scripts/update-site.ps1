@@ -63,7 +63,7 @@ Push-Location $repoRoot
 try {
     $status = git status --porcelain -- data
     if (-not $status) {
-        Write-Host "  No data changes since last publish — nothing to push."
+        Write-Host "  No data changes since last publish -- nothing to push."
         return
     }
     git add data

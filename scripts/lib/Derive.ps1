@@ -255,10 +255,11 @@ function New-CareerHighlights {
         $rowsForOwner = $g.Group
         $owner = $g.Name
 
-        $highest = $rowsForOwner | Sort-Object -Property points -Descending | Select-Object -First 1
-        $lowest  = $rowsForOwner | Sort-Object -Property points | Select-Object -First 1
-
         $decidedRows = $rowsForOwner | Where-Object { $_.oppOwner } # excludes playoff-bye rows (no real opponent)
+
+        $highest = $decidedRows | Sort-Object -Property points -Descending | Select-Object -First 1
+        $lowest  = $decidedRows | Sort-Object -Property points | Select-Object -First 1
+
         $wins = $decidedRows | Where-Object { $_.result -eq "W" }
         $losses = $decidedRows | Where-Object { $_.result -eq "L" }
 

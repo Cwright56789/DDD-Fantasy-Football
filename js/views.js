@@ -13,12 +13,34 @@ function resultPill(result) {
     return `<span class="pill tie">T</span>`;
 }
 
+function onionSvg(color) {
+    return `<svg width="14" height="14" viewBox="0 0 24 24" style="vertical-align:-2px" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2c-1 2-2 3-2 4.5 0 .6.2 1 .5 1.4C8.4 9.4 6 12.4 6 15.5 6 19.6 8.7 23 12 23s6-3.4 6-7.5c0-3.1-2.4-6.1-4.5-7.6.3-.4.5-.8.5-1.4C14 5 13 4 12 2z" fill="${color}"/>
+    </svg>`;
+}
+const TROPHY_ICON = "🏆";
+const ONION_WIN_ICON = onionSvg("#D9A521");
+const ONION_LOSE_ICON = onionSvg("#C0392B");
+
+function accoladeIcon(text) {
+    if (/champion$/i.test(text)) return TROPHY_ICON;
+    if (/onion bowl winner/i.test(text)) return ONION_WIN_ICON;
+    if (/onion bowl loser/i.test(text)) return ONION_LOSE_ICON;
+    return null;
+}
+
 function trophyBadges(accolades) {
     if (!accolades || !accolades.length) return "";
     return accolades.map(a => {
-        const isTrophy = /champion|onion bowl/i.test(a);
-        return `<span class="badge ${isTrophy ? "trophy" : ""}">${fmt.escapeHtml(a)}</span>`;
+        const icon = accoladeIcon(a);
+        return `<span class="badge ${icon ? "trophy" : ""}">${icon ? icon + " " : ""}${fmt.escapeHtml(a)}</span>`;
     }).join("");
+}
+
+function trophyIconRow(accolades) {
+    const icons = (accolades || []).map(accoladeIcon).filter(Boolean);
+    if (!icons.length) return "";
+    return `<div style="margin-top:8px;font-size:15px">${icons.join(" ")}</div>`;
 }
 
 function barChart(rows, { labelFn, valueFn, formatFn, maxAbs }) {
@@ -74,7 +96,7 @@ Views.home = async function (root) {
         const champLine = o.accolades.find(a => /champion$/i.test(a));
         return `<div class="stat-tile" style="text-align:left">
             <div style="font-size:12px;color:var(--text-muted)">${fmt.escapeHtml(champLine)}</div>
-            <div style="font-weight:700">${ownerLink(o.slug, o.nickname + " — " + o.displayName)}</div>
+            <div style="font-weight:700">${ownerLink(o.slug, o.displayName)}</div>
         </div>`;
     }).join("");
 
@@ -121,7 +143,7 @@ function renderStandingsTable(rows, ownerMap, luckRows) {
             const luck = luckByOwner[r.owner];
             return `<tr>
                 <td class="left">${i + 1}</td>
-                <td class="left">${ownerLink(r.owner, (o.nickname ? o.nickname + " · " : "") + (o.displayName || r.owner))}</td>
+                <td class="left">${ownerLink(r.owner, o.displayName || r.owner)}</td>
                 <td>${r.wins}</td><td>${r.losses}</td><td>${r.ties || 0}</td>
                 <td>${fmt.pts(r.pointsFor)}</td><td>${fmt.pts(r.pointsAgainst)}</td>
                 <td>${fmt.signed(r.pointsFor - r.pointsAgainst)}</td>
@@ -226,12 +248,10 @@ Views.teams = async function (root) {
 
     const cards = owners.map(o => {
         const rec = allTimeMap[o.slug];
-        const trophyCount = o.accolades.filter(a => /champion|onion bowl/i.test(a)).length;
         return `<a class="owner-card" href="#/teams/${o.slug}">
-            <div class="nickname">${fmt.escapeHtml(o.nickname || "")}</div>
             <div class="name">${fmt.escapeHtml(o.displayName)}</div>
             <div class="mini-record">${rec ? fmt.record(rec.wins, rec.losses, rec.ties) + " all-time" : ""}</div>
-            ${trophyCount ? `<div style="margin-top:8px">${"🏆".repeat(Math.min(trophyCount, 5))}</div>` : ""}
+            ${trophyIconRow(o.accolades)}
         </a>`;
     }).join("");
 
@@ -310,7 +330,6 @@ Views.teamProfile = async function (root, params) {
 
     root.innerHTML = `
         <div class="card">
-            <div class="nickname" style="font-size:13px">${fmt.escapeHtml(owner.nickname || "")}</div>
             <h1 style="margin:2px 0 10px">${fmt.escapeHtml(owner.displayName)}</h1>
             <div class="trophy-row">${trophyBadges(owner.accolades)}</div>
         </div>
@@ -514,7 +533,12 @@ Views.h2h = async function (root) {
         return null;
     }
 
-    const header = owners.map(o => `<th>${fmt.escapeHtml(o.nickname || o.displayName.split(" ")[0])}</th>`).join("");
+    function shortName(o) {
+        const parts = o.displayName.split(" ");
+        return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0]}.` : o.displayName;
+    }
+
+    const header = owners.map(o => `<th>${fmt.escapeHtml(shortName(o))}</th>`).join("");
     const rows = owners.map(rOwner => {
         const cells = owners.map(cOwner => {
             if (rOwner.slug === cOwner.slug) return `<td class="self">—</td>`;
@@ -522,7 +546,7 @@ Views.h2h = async function (root) {
             if (!rec) return `<td>—</td>`;
             return `<td><a href="#/teams/${rOwner.slug}" title="${fmt.escapeHtml(rOwner.displayName)} vs ${fmt.escapeHtml(cOwner.displayName)}">${rec.w}-${rec.l}${rec.t ? "-" + rec.t : ""}</a></td>`;
         }).join("");
-        return `<tr><th class="left">${fmt.escapeHtml(rOwner.nickname || rOwner.displayName)}</th>${cells}</tr>`;
+        return `<tr><th class="left">${fmt.escapeHtml(shortName(rOwner))}</th>${cells}</tr>`;
     }).join("");
 
     root.innerHTML = `
