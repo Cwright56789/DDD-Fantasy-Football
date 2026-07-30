@@ -113,6 +113,7 @@ Views.home = async function (root) {
         const bestGameOwnerName = ownerMap[fanFavorite.bestGame.owner]?.displayName || fanFavorite.bestGame.owner;
         const ownerListHtml = fanFavorite.byOwner.map(o => `<div class="bar-row" style="margin:4px 0">
             <div class="bar-label" style="width:140px">${ownerLink(o.owner, ownerMap[o.owner]?.displayName || o.owner)}</div>
+            <div style="font-size:12px;color:var(--text-muted);width:50px">${o.seasons.join("/")}</div>
             <div style="font-size:12px;color:var(--text-muted);width:70px">${o.games} game${o.games === 1 ? "" : "s"}</div>
             <div class="bar-value" style="width:auto;font-weight:700">${fmt.pts(o.points)} pts</div>
         </div>`).join("");
@@ -417,6 +418,7 @@ Views.stats = async function (root, params) {
         ["luck", "Luck"],
         ["efficiency", "Lineup Efficiency"],
         ["bench", "Bench"],
+        ["mistakes", "Bench Mistakes"],
         ["positions", "Positional Leaders"]
     ];
     root.innerHTML = `
@@ -432,6 +434,7 @@ Views.stats = async function (root, params) {
     if (tab === "luck") await Views._statsLuck(body, params.slice(1));
     else if (tab === "efficiency") await Views._statsEfficiency(body, params.slice(1));
     else if (tab === "bench") await Views._statsBench(body, params.slice(1));
+    else if (tab === "mistakes") await Views._statsMistakes(body, params.slice(1));
     else await Views._statsPositions(body, params.slice(1));
 };
 
@@ -522,6 +525,60 @@ Views._statsBench = async function (root, params) {
             <p style="color:var(--text-muted);font-size:13px">Position by position, each week: did a benched player at that spot outscore your worst starter there? Summed up, this is the cost of bad start/sit calls.</p>
             ${barChart(rows, { labelFn: r => ownerMap[r.owner] ? ownerMap[r.owner].displayName : r.owner, valueFn: r => r.points, formatFn: v => fmt.pts(v) })}
         </div>
+    `;
+};
+
+Views._statsMistakes = async function (root, params) {
+    const [meta, owners, mistakes] = await Promise.all([DDD.getMeta(), DDD.getOwners(), DDD.getBenchMistakes()]);
+    const ownerMap = {}; owners.forEach(o => ownerMap[o.slug] = o);
+    const options = [...meta.seasons].sort((a, b) => b - a);
+    const selected = params[0] || "all";
+
+    const rows = selected === "all" ? mistakes : mistakes.filter(r => r.season === Number(selected));
+
+    const byKey = {};
+    mistakes.forEach(r => { byKey[`${r.season}|${r.week}|${r.owner}`] = r; });
+    function opponentMistake(r) {
+        if (!r.opponent) return null;
+        return byKey[`${r.season}|${r.week}|${r.opponent}`] || null;
+    }
+
+    function mistakeRow(r, opts) {
+        opts = opts || {};
+        const om = opponentMistake(r);
+        return `<div class="card" style="padding:12px 14px;margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+                <div>
+                    <div style="font-weight:700">${ownerLink(r.owner, ownerMap[r.owner]?.displayName || r.owner)} <span style="color:var(--text-muted);font-weight:400">&middot; S${r.season} W${r.week} &middot; ${r.position}</span></div>
+                    <div style="font-size:13px;margin-top:4px">Benched <strong>${fmt.escapeHtml(r.benchedPlayer)}</strong> (${fmt.pts(r.benchedPoints)}) over started <strong>${fmt.escapeHtml(r.startedPlayer)}</strong> (${fmt.pts(r.startedPoints)})</div>
+                    ${r.opponent ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">
+                        vs ${ownerLink(r.opponent, ownerMap[r.opponent]?.displayName || r.opponent)}: ${fmt.pts(r.actualPoints)} - ${fmt.pts(r.opponentPoints)} ${resultPill(r.result)}
+                        ${om ? `&middot; they also left ${fmt.pts(om.pointsCost)} pts on their own bench (${fmt.escapeHtml(om.benchedPlayer)})` : ""}
+                    </div>` : ""}
+                </div>
+                <div style="text-align:right;flex-shrink:0">
+                    <div style="font-size:20px;font-weight:800">+${fmt.pts(r.pointsCost)}</div>
+                    <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">left on bench</div>
+                    ${r.wouldHaveFlipped ? `<div class="pill win" style="margin-top:4px">would've won</div>` : ""}
+                </div>
+            </div>
+        </div>`;
+    }
+
+    const flips = [...rows].filter(r => r.wouldHaveFlipped).sort((a, b) => b.pointsCost - a.pointsCost);
+    const biggest = [...rows].sort((a, b) => b.pointsCost - a.pointsCost).slice(0, 25);
+
+    root.innerHTML = `
+        <div class="card">
+            <div class="toolbar">
+                ${options.map(s => `<button class="btn ${String(s) === selected ? "active" : ""}" onclick="location.hash='#/stats/mistakes/${s}'">${s}</button>`).join("")}
+                <button class="btn ${selected === "all" ? "active" : ""}" onclick="location.hash='#/stats/mistakes/all'">All-Time</button>
+            </div>
+            <p style="color:var(--text-muted);font-size:13px">Each team's single worst "should've started that guy" call of the week (highest-scoring benched player vs. their weakest starter at the same position), and whether fixing it would've flipped the result.</p>
+        </div>
+        ${flips.length ? `<div class="section-title">😱 Would've Changed The Result (${flips.length})</div>${flips.map(r => mistakeRow(r)).join("")}` : ""}
+        <div class="section-title">Biggest Bench Mistakes</div>
+        ${biggest.map(r => mistakeRow(r)).join("")}
     `;
 };
 

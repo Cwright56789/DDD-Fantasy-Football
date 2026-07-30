@@ -341,6 +341,7 @@ function New-PlayerSpotlight {
             owner = $_.Name
             games = $_.Count
             points = Round2 (($_.Group | Measure-Object -Property points -Sum).Sum)
+            seasons = @($_.Group | Select-Object -ExpandProperty season -Unique | Sort-Object)
         }
     } | Sort-Object -Property games -Descending
 
@@ -352,6 +353,68 @@ function New-PlayerSpotlight {
         bestGame = [ordered]@{ points = Round2 $bestGame.points; season = $bestGame.season; week = $bestGame.week; owner = $bestGame.owner }
         byOwner = $byOwner
     }
+}
+
+function New-WeeklyBenchMistakes {
+    <#
+        For each team-week: the single biggest "should've started this guy
+        instead" mistake (highest-scoring benched player vs. the weakest
+        starter at the same position that week), and whether fixing it
+        would've flipped that week's result.
+    #>
+    param([array]$Boxscores, [array]$TeamWeekScores)
+
+    $twsLookup = @{}
+    foreach ($r in $TeamWeekScores) { $twsLookup["$($r.season)|$($r.week)|$($r.owner)"] = $r }
+
+    $rows = New-Object System.Collections.Generic.List[object]
+    $grouped = $Boxscores | Where-Object { $_.slot -ne "IR" } | Group-Object -Property season, week, owner
+    foreach ($g in $grouped) {
+        $players = $g.Group
+        $first = $players[0]
+
+        $bestMistake = $null
+        foreach ($posGroup in ($players | Group-Object -Property position)) {
+            $started = @($posGroup.Group | Where-Object { $_.slot -ne "Bench" })
+            $benched = @($posGroup.Group | Where-Object { $_.slot -eq "Bench" })
+            if ($started.Count -eq 0 -or $benched.Count -eq 0) { continue }
+            $minStarted = $started | Sort-Object -Property points | Select-Object -First 1
+            $maxBench = $benched | Sort-Object -Property points -Descending | Select-Object -First 1
+            $cost = $maxBench.points - $minStarted.points
+            if ($cost -gt 0 -and ($null -eq $bestMistake -or $cost -gt $bestMistake.cost)) {
+                $bestMistake = [pscustomobject]@{
+                    position = $posGroup.Name
+                    benchedPlayer = $maxBench.player; benchedPoints = $maxBench.points
+                    startedPlayer = $minStarted.player; startedPoints = $minStarted.points
+                    cost = $cost
+                }
+            }
+        }
+        if (-not $bestMistake) { continue }
+
+        $tws = $twsLookup["$($first.season)|$($first.week)|$($first.owner)"]
+        if (-not $tws) { continue }
+
+        $wouldHaveFlipped = $null
+        if ($tws.oppOwner) {
+            $hypotheticalPoints = $tws.points + $bestMistake.cost
+            $wouldHaveFlipped = ($tws.result -ne "W") -and ($hypotheticalPoints -gt $tws.oppPoints)
+        }
+
+        $rows.Add([pscustomobject]@{
+            season = $first.season; week = $first.week; owner = $first.owner
+            position = $bestMistake.position
+            benchedPlayer = $bestMistake.benchedPlayer; benchedPoints = Round2 $bestMistake.benchedPoints
+            startedPlayer = $bestMistake.startedPlayer; startedPoints = Round2 $bestMistake.startedPoints
+            pointsCost = Round2 $bestMistake.cost
+            actualPoints = Round2 $tws.points
+            opponent = $tws.oppOwner
+            opponentPoints = if ($null -ne $tws.oppPoints) { Round2 $tws.oppPoints } else { $null }
+            result = $tws.result
+            wouldHaveFlipped = $wouldHaveFlipped
+        })
+    }
+    return $rows
 }
 
 function New-HeadToHead {

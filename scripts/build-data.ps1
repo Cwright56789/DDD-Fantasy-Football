@@ -88,6 +88,9 @@ $careerHighlights = New-CareerHighlights -TeamWeekScores $teamWeekScores -Boxsco
 Write-Host "Computing bench points left (per-position)..."
 $benchTotals = New-BenchPointsLeft -Boxscores $boxscores
 
+Write-Host "Computing weekly bench mistakes..."
+$benchMistakes = New-WeeklyBenchMistakes -Boxscores $boxscores -TeamWeekScores $teamWeekScores
+
 Write-Host "Computing head-to-head..."
 $headToHead = New-HeadToHead -Matchups $matchups
 
@@ -187,6 +190,10 @@ $lineupEfficiency | ConvertTo-Json -Depth 4 -Compress | Set-Content -Path (Join-
 # ---- head-to-head.json ----
 Write-Host "Writing head-to-head.json..."
 $headToHead | ConvertTo-Json -Depth 4 -Compress | Set-Content -Path (Join-Path $OutDir "head-to-head.json") -Encoding utf8
+
+# ---- bench-mistakes.json ----
+Write-Host "Writing bench-mistakes.json..."
+$benchMistakes | ConvertTo-Json -Depth 4 -Compress | Set-Content -Path (Join-Path $OutDir "bench-mistakes.json") -Encoding utf8
 
 # ---- fan-favorite.json ----
 if ($fanFavorite) {
