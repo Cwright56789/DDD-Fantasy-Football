@@ -318,12 +318,11 @@ Views.teamProfile = async function (root, params) {
     const posOrder = ["QB", "RB", "WR", "TE", "D/ST", "K"];
     const posRows = [...(profile.positionalLeaders || [])].sort((a, b) => posOrder.indexOf(a.position) - posOrder.indexOf(b.position));
     const posTable = `<table class="data">
-        <thead><tr><th class="left">Position</th><th>All-Time Points</th><th class="left">Best Season</th><th>Season</th><th>Points</th></tr></thead>
+        <thead><tr><th class="left">Position</th><th>All-Time Points</th><th class="left">Best Single Season</th><th>Points</th></tr></thead>
         <tbody>${posRows.map(p => `<tr>
             <td class="left">${fmt.escapeHtml(p.position)}</td>
             <td>${fmt.pts(p.totalHistoricalPoints)}</td>
-            <td class="left">${fmt.escapeHtml(p.topPerformer)}</td>
-            <td>${p.topPerformerSeason}</td>
+            <td class="left">${fmt.escapeHtml(p.topPerformer)} <span style="color:var(--text-muted)">(${p.topPerformerSeason})</span></td>
             <td>${fmt.pts(p.topPerformerPoints)}</td>
         </tr>`).join("")}</tbody>
     </table>`;
