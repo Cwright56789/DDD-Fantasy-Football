@@ -46,13 +46,17 @@ try {
     [System.GC]::WaitForPendingFinalizers()
 }
 
-# ---------------------------------------------------------------- 2. Rebuild /data
+# ---------------------------------------------------------------- 2. Real transactions
+Step "Pulling ESPN's real transaction log for the current season..."
+& (Join-Path $PSScriptRoot "fetch-transactions.ps1") -XlsxPath $XlsxPath
+
+# ---------------------------------------------------------------- 3. Rebuild /data
 Step "Rebuilding site data from the refreshed workbook..."
 & (Join-Path $PSScriptRoot "xlsx-to-json.ps1") -XlsxPath $XlsxPath
 & (Join-Path $PSScriptRoot "xlsx-profiles-to-json.ps1") -XlsxPath $XlsxPath
 & (Join-Path $PSScriptRoot "build-data.ps1")
 
-# ---------------------------------------------------------------- 3. Publish
+# ---------------------------------------------------------------- 4. Publish
 if ($SkipPush) {
     Write-Host "`n-SkipPush set: data rebuilt locally, not committed or pushed." -ForegroundColor Yellow
     return

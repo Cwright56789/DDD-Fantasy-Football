@@ -440,7 +440,10 @@ Views.transactions = async function (root, params) {
     root.innerHTML = `
         <div class="card">
             <h2>Waiver Wire &amp; Trades</h2>
-            <p style="color:var(--text-muted);font-size:13px">Inferred from week-to-week roster changes (no direct transaction log is pulled from ESPN), so a "trade" here means players swapped rosters the same week &mdash; occasionally that could be back-to-back waiver moves instead of an actual trade, but multi-player swaps are almost always real trades.</p>
+            <p style="color:var(--text-muted);font-size:13px">
+                <strong>A note on accuracy:</strong> ESPN's real activity log only retains a rolling ~2-month window, so the 2023-2025 seasons can't be pulled from it &mdash; those trades are <em>inferred</em> from week-to-week roster changes instead (a "trade" means players swapped rosters the same week between two teams). Multi-player swaps are essentially certain to be real trades; single 1-for-1 swaps are flagged as lower-confidence since they could occasionally be coincidental, unrelated waiver moves.
+                Starting with the 2026 season, trades are pulled directly from ESPN's real transaction log and archived permanently here, so they'll only get more accurate and complete as the season goes on &mdash; no more guessing.
+            </p>
             <div class="toolbar">
                 <button class="btn ${subTab === "pickups" ? "active" : ""}" onclick="location.hash='#/transactions/pickups/${selected}'">Waiver Pickups</button>
                 <button class="btn ${subTab === "trades" ? "active" : ""}" onclick="location.hash='#/transactions/trades/${selected}'">Trades</button>
@@ -493,17 +496,21 @@ Views._transactionsTrades = function (root, tx, ownerMap, selected) {
     let trades = tx.trades;
     if (selected !== "all") trades = trades.filter(t => t.season === Number(selected));
 
-    // group same-week trades between the same two owners into one card
+    const verified = trades.filter(t => t.verified);
+    const heuristic = trades.filter(t => !t.verified);
+
+    // heuristic trades are logged one row per matched leg; group same-week
+    // legs between the same two owners into one card
     const groups = {};
-    trades.forEach(t => {
+    heuristic.forEach(t => {
         const pair = [t.teamA.owner, t.teamB.owner].sort().join("|");
         const key = `${t.season}|${t.week}|${pair}`;
-        if (!groups[key]) groups[key] = { season: t.season, week: t.week, owners: pair.split("|"), items: [] };
+        if (!groups[key]) groups[key] = { season: t.season, week: t.week, owners: pair.split("|"), items: [], confidence: t.confidence };
         groups[key].items.push(t);
     });
-    const groupList = Object.values(groups).sort((a, b) => (b.season - a.season) || (b.week - a.week));
+    const heuristicGroups = Object.values(groups).sort((a, b) => (b.season - a.season) || (b.week - a.week));
 
-    function side(items, ownerSlug) {
+    function heuristicSide(items, ownerSlug) {
         const total = items.reduce((s, it) => s + (it.teamA.owner === ownerSlug ? it.teamA.totalPoints : it.teamB.totalPoints), 0);
         const rows = items.map(it => {
             const side = it.teamA.owner === ownerSlug ? it.teamA : it.teamB;
@@ -512,12 +519,18 @@ Views._transactionsTrades = function (root, tx, ownerMap, selected) {
         return { total, rows };
     }
 
-    const cards = groupList.map(g => {
+    function confidenceBadge(confidence) {
+        if (confidence === "verified") return `<span class="badge trophy">✓ ESPN-verified</span>`;
+        if (confidence === "high") return `<span class="badge">high confidence</span>`;
+        return `<span class="badge">possible trade — could be coincidental waiver moves</span>`;
+    }
+
+    const heuristicCards = heuristicGroups.map(g => {
         const [ownerA, ownerB] = g.owners;
-        const a = side(g.items, ownerA), b = side(g.items, ownerB);
+        const a = heuristicSide(g.items, ownerA), b = heuristicSide(g.items, ownerB);
         const aWon = a.total > b.total, bWon = b.total > a.total;
         return `<div class="card">
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">S${g.season} W${g.week}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">S${g.season} W${g.week} &middot; ${confidenceBadge(g.confidence)}</div>
             <div class="grid cols-2">
                 <div>
                     <div style="font-weight:700">${ownerLink(ownerA, ownerMap[ownerA]?.displayName || ownerA)} received ${aWon ? "🏆" : ""}</div>
@@ -533,9 +546,26 @@ Views._transactionsTrades = function (root, tx, ownerMap, selected) {
         </div>`;
     }).join("");
 
+    const verifiedCards = verified.map(t => {
+        return `<div class="card">
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">S${t.season} &middot; ${confidenceBadge("verified")}</div>
+            <div class="grid cols-2">
+                <div>
+                    <div style="font-weight:700">${ownerLink(t.teamA.owner, ownerMap[t.teamA.owner]?.displayName || t.teamA.owner)} received</div>
+                    ${t.teamA.receivedItems.map(item => `<div style="font-size:13px;margin-top:2px">${fmt.escapeHtml(item)}</div>`).join("")}
+                </div>
+                <div>
+                    <div style="font-weight:700">${ownerLink(t.teamB.owner, ownerMap[t.teamB.owner]?.displayName || t.teamB.owner)} received</div>
+                    ${t.teamB.receivedItems.map(item => `<div style="font-size:13px;margin-top:2px">${fmt.escapeHtml(item)}</div>`).join("")}
+                </div>
+            </div>
+        </div>`;
+    }).join("");
+
     root.innerHTML = `
-        <div class="section-title">Detected Trades (${groupList.length})</div>
-        ${cards || `<p class="empty-state">No trades detected for this filter.</p>`}
+        ${verified.length ? `<div class="section-title">✓ ESPN-Verified Trades (${verified.length})</div>${verifiedCards}` : ""}
+        <div class="section-title">Inferred Trades from Roster History (${heuristicGroups.length})</div>
+        ${heuristicCards || `<p class="empty-state">No trades detected for this filter.</p>`}
     `;
 };
 

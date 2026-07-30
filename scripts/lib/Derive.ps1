@@ -531,7 +531,92 @@ function New-Transactions {
     }
     $remainingPickups = @($pickups | Where-Object { -not $tradedIndexes.Contains("$($_.season)|$($_.week)|$($_.owner)|$($_.player)") })
 
+    # Confidence: a same-week swap between two teams involving 2+ items each is
+    # essentially certain to be a real trade (vanishingly unlikely to be
+    # coincidental independent waiver moves). A single 1-for-1 swap could
+    # plausibly be two unrelated moves that happened to cross paths, so it's
+    # flagged lower-confidence rather than asserted as a trade outright.
+    $groupSizes = @{}
+    foreach ($t in $trades) {
+        $pair = @($t.teamA.owner, $t.teamB.owner) | Sort-Object
+        $key = "$($t.season)|$($t.week)|$($pair -join '|')"
+        if (-not $groupSizes.ContainsKey($key)) { $groupSizes[$key] = 0 }
+        $groupSizes[$key]++
+    }
+    foreach ($t in $trades) {
+        $pair = @($t.teamA.owner, $t.teamB.owner) | Sort-Object
+        $key = "$($t.season)|$($t.week)|$($pair -join '|')"
+        $t | Add-Member -NotePropertyName confidence -NotePropertyValue $(if ($groupSizes[$key] -ge 2) { "high" } else { "low" })
+        $t | Add-Member -NotePropertyName verified -NotePropertyValue $false
+    }
+
     return [ordered]@{ pickups = $remainingPickups; trades = $trades.ToArray() }
+}
+
+function New-VerifiedTrades {
+    <#
+        Parses the real ESPN transaction archive (fetch-transactions.ps1) into
+        trade groupings. Each real trade gets reported redundantly at multiple
+        lifecycle stages (proposed/accepted/processed) as separate messages
+        with the same from/to/target -- these are deduped first. Remaining
+        legs are grouped by same-day + owner-pair into one trade record.
+    #>
+    param([array]$ArchiveRows)
+
+    if (-not $ArchiveRows -or $ArchiveRows.Count -eq 0) { return @() }
+
+    $legs = New-Object System.Collections.Generic.List[object]
+    $seen = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($r in $ArchiveRows) {
+        if (-not $r."From Owner" -or -not $r."To Owner") { continue } # not a team-to-team move
+        $fromOwner = ConvertTo-OwnerSlug $r."From Owner"
+        $toOwner = ConvertTo-OwnerSlug $r."To Owner"
+        $targetId = $r."Target ID"
+        $key = "$fromOwner|$toOwner|$targetId"
+        if ($seen.Contains($key)) { continue }
+        $seen.Add($key) | Out-Null
+
+        $msgDate = [double]$r."Message Date"
+        $dayKey = [math]::Floor($msgDate / 86400000) # epoch ms -> day bucket
+
+        $legs.Add([pscustomobject]@{
+            season = [int]$r.Season
+            dayKey = $dayKey
+            fromOwner = $fromOwner
+            toOwner = $toOwner
+            asset = if ($r."Target Name") { $r."Target Name" } else { "Draft pick / unresolved asset" }
+        })
+    }
+
+    $trades = New-Object System.Collections.Generic.List[object]
+
+    # Group by season|day|sorted-owner-pair so multi-item trades collapse into one record.
+    $groups = @{}
+    foreach ($leg in $legs) {
+        $pair = @($leg.fromOwner, $leg.toOwner) | Sort-Object
+        $key = "$($leg.season)|$($leg.dayKey)|$($pair -join '_')"
+        if (-not $groups.ContainsKey($key)) { $groups[$key] = New-Object System.Collections.Generic.List[object] }
+        $groups[$key].Add($leg)
+    }
+
+    foreach ($key in $groups.Keys) {
+        $items = $groups[$key]
+        $pair = @($items[0].fromOwner, $items[0].toOwner) | Sort-Object
+        $ownerA, $ownerB = $pair[0], $pair[1]
+        $aReceived = @($items | Where-Object { $_.toOwner -eq $ownerA } | ForEach-Object { $_.asset })
+        $bReceived = @($items | Where-Object { $_.toOwner -eq $ownerB } | ForEach-Object { $_.asset })
+        if ($aReceived.Count -eq 0 -and $bReceived.Count -eq 0) { continue }
+
+        $trades.Add([pscustomobject]@{
+            season = $items[0].season
+            teamA = [pscustomobject]@{ owner = $ownerA; receivedItems = $aReceived }
+            teamB = [pscustomobject]@{ owner = $ownerB; receivedItems = $bReceived }
+            verified = $true
+            confidence = "verified"
+        })
+    }
+
+    return $trades.ToArray()
 }
 
 function New-HeadToHead {

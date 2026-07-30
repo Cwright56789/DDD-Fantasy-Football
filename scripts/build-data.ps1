@@ -101,6 +101,15 @@ $fanFavorite = New-PlayerSpotlight -Boxscores $boxscores -PlayerName "Rashid Sha
 Write-Host "Computing waiver/trade transactions (this can take a minute)..."
 $transactions = New-Transactions -Boxscores $boxscores
 
+$archivePath = Join-Path $PSScriptRoot "..\data\archive\transactions-raw.json"
+if (Test-Path $archivePath) {
+    Write-Host "Merging real ESPN transaction archive (current season)..."
+    $archiveRows = Get-Content $archivePath -Raw | ConvertFrom-Json
+    $verifiedTrades = New-VerifiedTrades -ArchiveRows $archiveRows
+    Write-Host "  $($verifiedTrades.Count) verified trades from $($archiveRows.Count) archived messages"
+    $transactions.trades = @($transactions.trades) + @($verifiedTrades)
+}
+
 # ---- owners.json: canonical identity + manual profile content ----
 Write-Host "Writing owners.json..."
 $owners = New-Object System.Collections.Generic.List[object]
