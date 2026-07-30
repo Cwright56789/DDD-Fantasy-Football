@@ -109,3 +109,22 @@ const fmt = {
             .replace(/"/g, "&quot;");
     }
 };
+
+// Per-device trade exclusion toggles (Stats/Trades pages). Stored in this
+// browser only -- not synced anywhere, so it's a personal "what if I ignore
+// this one" filter, not an edit to the underlying data.
+const TradeExclusions = {
+    _key: "ddd_excluded_trades",
+    _get() {
+        try { return JSON.parse(localStorage.getItem(this._key)) || {}; }
+        catch { return {}; }
+    },
+    isExcluded(id) { return !!this._get()[id]; },
+    toggle(id) {
+        const map = this._get();
+        if (map[id]) delete map[id]; else map[id] = true;
+        localStorage.setItem(this._key, JSON.stringify(map));
+    },
+    count() { return Object.keys(this._get()).length; },
+    clearAll() { localStorage.removeItem(this._key); }
+};

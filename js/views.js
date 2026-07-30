@@ -505,17 +505,33 @@ Views._transactionsTrades = function (root, tx, ownerMap, selected) {
     heuristic.forEach(t => {
         const pair = [t.teamA.owner, t.teamB.owner].sort().join("|");
         const key = `${t.season}|${t.week}|${pair}`;
-        if (!groups[key]) groups[key] = { season: t.season, week: t.week, owners: pair.split("|"), items: [], confidence: t.confidence };
+        if (!groups[key]) groups[key] = { season: t.season, week: t.week, owners: pair.split("|"), items: [], confidence: t.confidence, id: `h:${key}` };
         groups[key].items.push(t);
     });
     const heuristicGroups = Object.values(groups).sort((a, b) => (b.season - a.season) || (b.week - a.week));
     const highGroups = heuristicGroups.filter(g => g.confidence === "high");
     const lowGroups = heuristicGroups.filter(g => g.confidence !== "high");
 
-    // ---- net trade value per owner: points received minus points given up, summed across every trade ----
+    verified.forEach(t => {
+        const pair = [t.teamA.owner, t.teamB.owner].sort().join("|");
+        t.id = `v:${t.season}|${pair}|${t.teamA.receivedItems.join(",")}|${t.teamB.receivedItems.join(",")}`;
+    });
+
+    // re-render triggers for the exclusion toggles below
+    window.__tradeToggle = (id) => { TradeExclusions.toggle(id); Views._transactionsTrades(root, tx, ownerMap, selected); };
+    window.__tradeReset = () => { TradeExclusions.clearAll(); Views._transactionsTrades(root, tx, ownerMap, selected); };
+
+    function excludeToggle(id) {
+        const excluded = TradeExclusions.isExcluded(id);
+        return `<label style="font-size:12px;color:var(--text-muted);cursor:pointer;user-select:none">
+            <input type="checkbox" ${excluded ? "checked" : ""} onchange="window.__tradeToggle('${id}')"> Exclude from totals
+        </label>`;
+    }
+
+    // ---- net trade value per owner: points received minus points given up, summed across every non-excluded trade ----
     const netValue = {};
     function addNet(owner, delta) { netValue[owner] = (netValue[owner] || 0) + delta; }
-    heuristicGroups.forEach(g => {
+    heuristicGroups.filter(g => !TradeExclusions.isExcluded(g.id)).forEach(g => {
         const [ownerA, ownerB] = g.owners;
         const aTotal = g.items.reduce((s, it) => s + (it.teamA.owner === ownerA ? it.teamA.totalPoints : it.teamB.totalPoints), 0);
         const bTotal = g.items.reduce((s, it) => s + (it.teamA.owner === ownerB ? it.teamA.totalPoints : it.teamB.totalPoints), 0);
@@ -523,6 +539,7 @@ Views._transactionsTrades = function (root, tx, ownerMap, selected) {
         addNet(ownerB, bTotal - aTotal);
     });
     const netRows = Object.keys(netValue).map(owner => ({ owner, value: netValue[owner] })).sort((a, b) => b.value - a.value);
+    const excludedCount = TradeExclusions.count();
 
     function heuristicSide(items, ownerSlug) {
         const total = items.reduce((s, it) => s + (it.teamA.owner === ownerSlug ? it.teamA.totalPoints : it.teamB.totalPoints), 0);
@@ -543,8 +560,12 @@ Views._transactionsTrades = function (root, tx, ownerMap, selected) {
         const [ownerA, ownerB] = g.owners;
         const a = heuristicSide(g.items, ownerA), b = heuristicSide(g.items, ownerB);
         const aWon = a.total > b.total, bWon = b.total > a.total;
-        return `<div class="card">
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Week ${g.week} &middot; ${confidenceBadge(g.confidence)}</div>
+        const excluded = TradeExclusions.isExcluded(g.id);
+        return `<div class="card" style="${excluded ? "opacity:.5" : ""}">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                <div style="font-size:12px;color:var(--text-muted)">Week ${g.week} &middot; ${confidenceBadge(g.confidence)}</div>
+                ${excludeToggle(g.id)}
+            </div>
             <div class="grid cols-2">
                 <div>
                     <div style="font-weight:700">${ownerLink(ownerA, ownerMap[ownerA]?.displayName || ownerA)} received ${aWon ? "🏆" : ""}</div>
@@ -561,8 +582,12 @@ Views._transactionsTrades = function (root, tx, ownerMap, selected) {
     }
 
     function verifiedCard(t) {
-        return `<div class="card">
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">${confidenceBadge("verified")}</div>
+        const excluded = TradeExclusions.isExcluded(t.id);
+        return `<div class="card" style="${excluded ? "opacity:.5" : ""}">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                <div style="font-size:12px;color:var(--text-muted)">${confidenceBadge("verified")}</div>
+                ${excludeToggle(t.id)}
+            </div>
             <div class="grid cols-2">
                 <div>
                     <div style="font-weight:700">${ownerLink(t.teamA.owner, ownerMap[t.teamA.owner]?.displayName || t.teamA.owner)} received</div>
@@ -593,8 +618,11 @@ Views._transactionsTrades = function (root, tx, ownerMap, selected) {
 
     const netValueHtml = netRows.length ? `
         <div class="card">
-            <h3>Net Trade Value by Team</h3>
-            <p style="color:var(--text-muted);font-size:13px">Points gained minus points given up, summed across every inferred trade (2023-2025 only &mdash; verified 2026+ trades don't have point totals yet since they're mostly draft picks).</p>
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
+                <h3 style="margin:0">Net Trade Value by Team</h3>
+                ${excludedCount ? `<button class="btn" onclick="window.__tradeReset()">${excludedCount} trade${excludedCount === 1 ? "" : "s"} excluded — reset</button>` : ""}
+            </div>
+            <p style="color:var(--text-muted);font-size:13px">Points gained minus points given up, summed across every inferred trade (2023-2025 only &mdash; verified 2026+ trades don't have point totals yet since they're mostly draft picks). Use "Exclude from totals" on any trade below if you know it wasn't real &mdash; this is saved on your device only, so it won't change what other people see.</p>
             ${barChart(netRows, { labelFn: r => ownerMap[r.owner]?.displayName || r.owner, valueFn: r => r.value, formatFn: v => fmt.signed(v) })}
         </div>` : "";
 
