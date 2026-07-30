@@ -97,6 +97,9 @@ $headToHead = New-HeadToHead -Matchups $matchups
 Write-Host "Computing player spotlight..."
 $fanFavorite = New-PlayerSpotlight -Boxscores $boxscores -PlayerName "Rashid Shaheed"
 
+Write-Host "Computing waiver/trade transactions (this can take a minute)..."
+$transactions = New-Transactions -Boxscores $boxscores
+
 # ---- owners.json: canonical identity + manual profile content ----
 Write-Host "Writing owners.json..."
 $owners = New-Object System.Collections.Generic.List[object]
@@ -200,5 +203,9 @@ if ($fanFavorite) {
     Write-Host "Writing fan-favorite.json..."
     $fanFavorite | ConvertTo-Json -Depth 6 -Compress | Set-Content -Path (Join-Path $OutDir "fan-favorite.json") -Encoding utf8
 }
+
+# ---- transactions.json ----
+Write-Host "Writing transactions.json..."
+$transactions | ConvertTo-Json -Depth 6 -Compress | Set-Content -Path (Join-Path $OutDir "transactions.json") -Encoding utf8
 
 Write-Host "Done. /data is ready."

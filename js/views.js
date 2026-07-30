@@ -7,12 +7,6 @@ function ownerLink(slug, name) {
     return `<a href="#/teams/${slug}">${fmt.escapeHtml(name)}</a>`;
 }
 
-function resultPill(result) {
-    if (result === "W") return `<span class="pill win">W</span>`;
-    if (result === "L") return `<span class="pill loss">L</span>`;
-    return `<span class="pill tie">T</span>`;
-}
-
 function onionSvg(color) {
     return `<svg width="14" height="14" viewBox="0 0 24 24" style="vertical-align:-2px" xmlns="http://www.w3.org/2000/svg">
         <path d="M12 2c-1 2-2 3-2 4.5 0 .6.2 1 .5 1.4C8.4 9.4 6 12.4 6 15.5 6 19.6 8.7 23 12 23s6-3.4 6-7.5c0-3.1-2.4-6.1-4.5-7.6.3-.4.5-.8.5-1.4C14 5 13 4 12 2z" fill="${color}"/>
@@ -85,7 +79,8 @@ Views.home = async function (root) {
 
     let matchupsHtml;
     if (thisWeekGames.length) {
-        matchupsHtml = thisWeekGames.map(m => matchupCard(m, ownerMap)).join("");
+        const mistakesLookup = await buildMistakesLookup(meta.currentSeason);
+        matchupsHtml = thisWeekGames.map(m => matchupCard(m, ownerMap, { mistakesLookup })).join("");
     } else {
         matchupsHtml = `<p class="empty-state">No games yet this week.</p>`;
     }
@@ -193,8 +188,19 @@ function renderStandingsTable(rows, ownerMap, luckRows) {
     </table>`;
 }
 
+function benchMistakeNote(m, ownerSlug, mistakesLookup) {
+    if (!mistakesLookup) return "";
+    const r = mistakesLookup[`${m.season}|${m.week}|${ownerSlug}`];
+    if (!r) return "";
+    const flipTag = r.wouldHaveFlipped ? ` <strong style="color:var(--win)">— would've won</strong>` : "";
+    return `<div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">
+        ⚠️ left <strong>${fmt.pts(r.pointsCost)} pts</strong> on the bench (${fmt.escapeHtml(r.benchedPlayer)} over ${fmt.escapeHtml(r.startedPlayer)})${flipTag}
+    </div>`;
+}
+
 function matchupCard(m, ownerMap, opts) {
     opts = opts || {};
+    const mistakesLookup = opts.mistakesLookup;
     const awayWin = m.winner === "AWAY", homeWin = m.winner === "HOME";
     const ao = ownerMap[m.awayOwner] || {}, ho = ownerMap[m.homeOwner] || {};
     const id = `mu-${m.season}-${m.week}-${m.game}`;
@@ -202,7 +208,9 @@ function matchupCard(m, ownerMap, opts) {
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;cursor:pointer" onclick="Views._toggleBox('${id}', ${m.season}, ${m.week}, '${m.awayOwner}', '${m.homeOwner}')">
             <div style="flex:1">
                 <div style="font-weight:${awayWin ? 700 : 400}">${fmt.escapeHtml(m.awayTeam)} <span style="color:var(--text-muted);font-weight:400">(${ownerLinkText(ao)})</span></div>
-                <div style="font-weight:${homeWin ? 700 : 400}">${fmt.escapeHtml(m.homeTeam)} <span style="color:var(--text-muted);font-weight:400">(${ownerLinkText(ho)})</span></div>
+                ${benchMistakeNote(m, m.awayOwner, mistakesLookup)}
+                <div style="font-weight:${homeWin ? 700 : 400};margin-top:6px">${fmt.escapeHtml(m.homeTeam)} <span style="color:var(--text-muted);font-weight:400">(${ownerLinkText(ho)})</span></div>
+                ${benchMistakeNote(m, m.homeOwner, mistakesLookup)}
             </div>
             <div style="text-align:right;font-variant-numeric:tabular-nums">
                 <div style="font-weight:${awayWin ? 700 : 400}">${fmt.pts(m.awayPts)}</div>
@@ -213,6 +221,14 @@ function matchupCard(m, ownerMap, opts) {
     </div>`;
 }
 function ownerLinkText(o) { return o.displayName ? `<a href="#/teams/${o.slug}">${fmt.escapeHtml(o.displayName)}</a>` : ""; }
+
+async function buildMistakesLookup(season) {
+    const mistakes = await DDD.getBenchMistakes();
+    const rows = season ? mistakes.filter(r => r.season === season) : mistakes;
+    const lookup = {};
+    rows.forEach(r => { lookup[`${r.season}|${r.week}|${r.owner}`] = r; });
+    return lookup;
+}
 
 Views._toggleBox = async function (id, season, week, awayOwner, homeOwner) {
     const el = document.getElementById(id);
@@ -390,6 +406,8 @@ Views.matchups = async function (root, params) {
     const games = matchups.filter(m => m.season === season && m.week === week)
         .sort((a, b) => a.game - b.game);
 
+    const mistakesLookup = games.length ? await buildMistakesLookup(season) : null;
+
     root.innerHTML = `
         <div class="card">
             <h2>Matchups</h2>
@@ -399,7 +417,7 @@ Views.matchups = async function (root, params) {
             </div>
         </div>
         <div id="matchup-list">
-            ${games.length ? games.map(m => matchupCard(m, ownerMap)).join("") : `<p class="empty-state">No games this week.</p>`}
+            ${games.length ? games.map(m => matchupCard(m, ownerMap, { mistakesLookup })).join("") : `<p class="empty-state">No games this week.</p>`}
         </div>
     `;
 
@@ -411,6 +429,116 @@ Views.matchups = async function (root, params) {
     });
 };
 
+// ---------------------------------------------------------------- Transactions
+Views.transactions = async function (root, params) {
+    const [meta, owners, tx] = await Promise.all([DDD.getMeta(), DDD.getOwners(), DDD.getTransactions()]);
+    const ownerMap = {}; owners.forEach(o => ownerMap[o.slug] = o);
+    const seasonOptions = [...meta.seasons].sort((a, b) => b - a);
+    const subTab = params[0] || "pickups";
+    const selected = params[1] || "all";
+
+    root.innerHTML = `
+        <div class="card">
+            <h2>Waiver Wire &amp; Trades</h2>
+            <p style="color:var(--text-muted);font-size:13px">Inferred from week-to-week roster changes (no direct transaction log is pulled from ESPN), so a "trade" here means players swapped rosters the same week &mdash; occasionally that could be back-to-back waiver moves instead of an actual trade, but multi-player swaps are almost always real trades.</p>
+            <div class="toolbar">
+                <button class="btn ${subTab === "pickups" ? "active" : ""}" onclick="location.hash='#/transactions/pickups/${selected}'">Waiver Pickups</button>
+                <button class="btn ${subTab === "trades" ? "active" : ""}" onclick="location.hash='#/transactions/trades/${selected}'">Trades</button>
+            </div>
+            <div class="toolbar">
+                ${seasonOptions.map(s => `<button class="btn ${String(s) === selected ? "active" : ""}" onclick="location.hash='#/transactions/${subTab}/${s}'">${s}</button>`).join("")}
+                <button class="btn ${selected === "all" ? "active" : ""}" onclick="location.hash='#/transactions/${subTab}/all'">All-Time</button>
+            </div>
+        </div>
+        <div id="tx-body"></div>
+    `;
+
+    const body = document.getElementById("tx-body");
+    if (subTab === "trades") Views._transactionsTrades(body, tx, ownerMap, selected);
+    else Views._transactionsPickups(body, tx, ownerMap, selected);
+};
+
+Views._transactionsPickups = function (root, tx, ownerMap, selected) {
+    let rows = tx.pickups.filter(p => !p.fromOwner);
+    if (selected !== "all") rows = rows.filter(p => p.season === Number(selected));
+    rows = [...rows].sort((a, b) => b.totalPoints - a.totalPoints).slice(0, 40);
+
+    root.innerHTML = `
+        <div class="section-title">Best Waiver / Free-Agent Pickups</div>
+        <div class="card">
+            <div class="table-scroll">
+                <table class="data">
+                    <thead><tr>
+                        <th class="left">Owner</th><th class="left">Player</th><th>Pos</th>
+                        <th class="left">Acquired</th><th>Weeks Rostered</th><th>Total Pts</th><th>Started Pts</th><th>Pts/Wk</th><th></th>
+                    </tr></thead>
+                    <tbody>${rows.map(r => `<tr>
+                        <td class="left">${ownerLink(r.owner, ownerMap[r.owner]?.displayName || r.owner)}</td>
+                        <td class="left">${fmt.escapeHtml(r.player)}</td>
+                        <td>${fmt.escapeHtml(r.position)}</td>
+                        <td class="left">S${r.season} W${r.week}</td>
+                        <td>${r.weeksRostered}</td>
+                        <td><strong>${fmt.pts(r.totalPoints)}</strong></td>
+                        <td>${fmt.pts(r.startedPoints)}</td>
+                        <td>${fmt.pts(r.avgPointsPerWeek)}</td>
+                        <td>${r.stillRostered ? `<span class="badge">still rostered</span>` : ""}</td>
+                    </tr>`).join("")}</tbody>
+                </table>
+            </div>
+        </div>
+    `;
+};
+
+Views._transactionsTrades = function (root, tx, ownerMap, selected) {
+    let trades = tx.trades;
+    if (selected !== "all") trades = trades.filter(t => t.season === Number(selected));
+
+    // group same-week trades between the same two owners into one card
+    const groups = {};
+    trades.forEach(t => {
+        const pair = [t.teamA.owner, t.teamB.owner].sort().join("|");
+        const key = `${t.season}|${t.week}|${pair}`;
+        if (!groups[key]) groups[key] = { season: t.season, week: t.week, owners: pair.split("|"), items: [] };
+        groups[key].items.push(t);
+    });
+    const groupList = Object.values(groups).sort((a, b) => (b.season - a.season) || (b.week - a.week));
+
+    function side(items, ownerSlug) {
+        const total = items.reduce((s, it) => s + (it.teamA.owner === ownerSlug ? it.teamA.totalPoints : it.teamB.totalPoints), 0);
+        const rows = items.map(it => {
+            const side = it.teamA.owner === ownerSlug ? it.teamA : it.teamB;
+            return `<div style="font-size:13px;margin-top:2px">${fmt.escapeHtml(side.received)} <span style="color:var(--text-muted)">(${side.position}, ${fmt.pts(side.totalPoints)} pts, ${side.weeksRostered}wk)</span></div>`;
+        }).join("");
+        return { total, rows };
+    }
+
+    const cards = groupList.map(g => {
+        const [ownerA, ownerB] = g.owners;
+        const a = side(g.items, ownerA), b = side(g.items, ownerB);
+        const aWon = a.total > b.total, bWon = b.total > a.total;
+        return `<div class="card">
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">S${g.season} W${g.week}</div>
+            <div class="grid cols-2">
+                <div>
+                    <div style="font-weight:700">${ownerLink(ownerA, ownerMap[ownerA]?.displayName || ownerA)} received ${aWon ? "🏆" : ""}</div>
+                    ${a.rows}
+                    <div style="margin-top:6px;font-weight:700">${fmt.pts(a.total)} pts total</div>
+                </div>
+                <div>
+                    <div style="font-weight:700">${ownerLink(ownerB, ownerMap[ownerB]?.displayName || ownerB)} received ${bWon ? "🏆" : ""}</div>
+                    ${b.rows}
+                    <div style="margin-top:6px;font-weight:700">${fmt.pts(b.total)} pts total</div>
+                </div>
+            </div>
+        </div>`;
+    }).join("");
+
+    root.innerHTML = `
+        <div class="section-title">Detected Trades (${groupList.length})</div>
+        ${cards || `<p class="empty-state">No trades detected for this filter.</p>`}
+    `;
+};
+
 // ---------------------------------------------------------------- Stats
 Views.stats = async function (root, params) {
     const tab = params[0] || "luck";
@@ -418,7 +546,6 @@ Views.stats = async function (root, params) {
         ["luck", "Luck"],
         ["efficiency", "Lineup Efficiency"],
         ["bench", "Bench"],
-        ["mistakes", "Bench Mistakes"],
         ["positions", "Positional Leaders"]
     ];
     root.innerHTML = `
@@ -434,7 +561,6 @@ Views.stats = async function (root, params) {
     if (tab === "luck") await Views._statsLuck(body, params.slice(1));
     else if (tab === "efficiency") await Views._statsEfficiency(body, params.slice(1));
     else if (tab === "bench") await Views._statsBench(body, params.slice(1));
-    else if (tab === "mistakes") await Views._statsMistakes(body, params.slice(1));
     else await Views._statsPositions(body, params.slice(1));
 };
 
@@ -525,60 +651,6 @@ Views._statsBench = async function (root, params) {
             <p style="color:var(--text-muted);font-size:13px">Position by position, each week: did a benched player at that spot outscore your worst starter there? Summed up, this is the cost of bad start/sit calls.</p>
             ${barChart(rows, { labelFn: r => ownerMap[r.owner] ? ownerMap[r.owner].displayName : r.owner, valueFn: r => r.points, formatFn: v => fmt.pts(v) })}
         </div>
-    `;
-};
-
-Views._statsMistakes = async function (root, params) {
-    const [meta, owners, mistakes] = await Promise.all([DDD.getMeta(), DDD.getOwners(), DDD.getBenchMistakes()]);
-    const ownerMap = {}; owners.forEach(o => ownerMap[o.slug] = o);
-    const options = [...meta.seasons].sort((a, b) => b - a);
-    const selected = params[0] || "all";
-
-    const rows = selected === "all" ? mistakes : mistakes.filter(r => r.season === Number(selected));
-
-    const byKey = {};
-    mistakes.forEach(r => { byKey[`${r.season}|${r.week}|${r.owner}`] = r; });
-    function opponentMistake(r) {
-        if (!r.opponent) return null;
-        return byKey[`${r.season}|${r.week}|${r.opponent}`] || null;
-    }
-
-    function mistakeRow(r, opts) {
-        opts = opts || {};
-        const om = opponentMistake(r);
-        return `<div class="card" style="padding:12px 14px;margin-bottom:10px">
-            <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
-                <div>
-                    <div style="font-weight:700">${ownerLink(r.owner, ownerMap[r.owner]?.displayName || r.owner)} <span style="color:var(--text-muted);font-weight:400">&middot; S${r.season} W${r.week} &middot; ${r.position}</span></div>
-                    <div style="font-size:13px;margin-top:4px">Benched <strong>${fmt.escapeHtml(r.benchedPlayer)}</strong> (${fmt.pts(r.benchedPoints)}) over started <strong>${fmt.escapeHtml(r.startedPlayer)}</strong> (${fmt.pts(r.startedPoints)})</div>
-                    ${r.opponent ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">
-                        vs ${ownerLink(r.opponent, ownerMap[r.opponent]?.displayName || r.opponent)}: ${fmt.pts(r.actualPoints)} - ${fmt.pts(r.opponentPoints)} ${resultPill(r.result)}
-                        ${om ? `&middot; they also left ${fmt.pts(om.pointsCost)} pts on their own bench (${fmt.escapeHtml(om.benchedPlayer)})` : ""}
-                    </div>` : ""}
-                </div>
-                <div style="text-align:right;flex-shrink:0">
-                    <div style="font-size:20px;font-weight:800">+${fmt.pts(r.pointsCost)}</div>
-                    <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">left on bench</div>
-                    ${r.wouldHaveFlipped ? `<div class="pill win" style="margin-top:4px">would've won</div>` : ""}
-                </div>
-            </div>
-        </div>`;
-    }
-
-    const flips = [...rows].filter(r => r.wouldHaveFlipped).sort((a, b) => b.pointsCost - a.pointsCost);
-    const biggest = [...rows].sort((a, b) => b.pointsCost - a.pointsCost).slice(0, 25);
-
-    root.innerHTML = `
-        <div class="card">
-            <div class="toolbar">
-                ${options.map(s => `<button class="btn ${String(s) === selected ? "active" : ""}" onclick="location.hash='#/stats/mistakes/${s}'">${s}</button>`).join("")}
-                <button class="btn ${selected === "all" ? "active" : ""}" onclick="location.hash='#/stats/mistakes/all'">All-Time</button>
-            </div>
-            <p style="color:var(--text-muted);font-size:13px">Each team's single worst "should've started that guy" call of the week (highest-scoring benched player vs. their weakest starter at the same position), and whether fixing it would've flipped the result.</p>
-        </div>
-        ${flips.length ? `<div class="section-title">😱 Would've Changed The Result (${flips.length})</div>${flips.map(r => mistakeRow(r)).join("")}` : ""}
-        <div class="section-title">Biggest Bench Mistakes</div>
-        ${biggest.map(r => mistakeRow(r)).join("")}
     `;
 };
 

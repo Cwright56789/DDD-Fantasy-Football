@@ -417,6 +417,123 @@ function New-WeeklyBenchMistakes {
     return $rows
 }
 
+function New-Transactions {
+    <#
+        No real ESPN transaction log is pulled, so this infers roster moves by
+        diffing each team's weekly roster: a player who shows up on someone's
+        roster this week but wasn't there last week was acquired. If nobody
+        had them last week, it's a waiver/free-agent pickup; if another owner
+        had them, it's an inter-team move (and if the reverse also happened
+        the same week between the same two teams, it's flagged as a likely
+        trade). "Effectiveness" = points scored while they stayed rostered.
+    #>
+    param([array]$Boxscores)
+
+    $pickups = New-Object System.Collections.Generic.List[object]
+
+    foreach ($seasonGroup in ($Boxscores | Group-Object -Property season)) {
+        $season = [int]$seasonGroup.Name
+        $seasonRows = $seasonGroup.Group
+        $weeks = @($seasonRows | Select-Object -ExpandProperty week -Unique | Sort-Object)
+
+        # rosterByWeek[week] = @{ owner = @(player,...) }; ownerByWeek[week] = @{ player = owner }
+        # pointsLookup["week|owner|player"] = @{ points=; slot=; position= }
+        $rosterByWeek = @{}
+        $ownerByWeek = @{}
+        $pointsLookup = @{}
+        foreach ($w in $weeks) {
+            $wRows = $seasonRows | Where-Object { $_.week -eq $w }
+            $rosterByWeek[$w] = @{}
+            $ownerByWeek[$w] = @{}
+            foreach ($og in ($wRows | Group-Object -Property owner)) {
+                $players = @($og.Group | Select-Object -ExpandProperty player -Unique)
+                $rosterByWeek[$w][$og.Name] = $players
+                foreach ($p in $players) { $ownerByWeek[$w][$p] = $og.Name }
+            }
+            foreach ($row in $wRows) {
+                $pointsLookup["$w|$($row.owner)|$($row.player)"] = $row
+            }
+        }
+
+        for ($i = 1; $i -lt $weeks.Count; $i++) {
+            $w = $weeks[$i]; $prevW = $weeks[$i - 1]
+            foreach ($owner in $rosterByWeek[$w].Keys) {
+                $current = $rosterByWeek[$w][$owner]
+                $previous = if ($rosterByWeek[$prevW].ContainsKey($owner)) { $rosterByWeek[$prevW][$owner] } else { @() }
+                $newPlayers = @($current | Where-Object { $previous -notcontains $_ })
+
+                foreach ($player in $newPlayers) {
+                    $fromOwner = if ($ownerByWeek[$prevW].ContainsKey($player)) { $ownerByWeek[$prevW][$player] } else { $null }
+                    if ($fromOwner -eq $owner) { continue }
+
+                    $acqRow = $pointsLookup["$w|$owner|$player"]
+
+                    # walk forward while still on this roster; stop at the first
+                    # gap (drop) or end of season
+                    $weeksRostered = 0; $totalPoints = 0.0; $startedPoints = 0.0
+                    $stillRostered = $true
+                    for ($j = $i; $j -lt $weeks.Count; $j++) {
+                        $ww = $weeks[$j]
+                        if (-not ($rosterByWeek[$ww].ContainsKey($owner)) -or ($rosterByWeek[$ww][$owner] -notcontains $player)) {
+                            $stillRostered = $false
+                            break
+                        }
+                        $weeksRostered++
+                        $row = $pointsLookup["$ww|$owner|$player"]
+                        if ($row) {
+                            $totalPoints += $row.points
+                            if ($row.slot -ne "Bench") { $startedPoints += $row.points }
+                        }
+                    }
+
+                    $pickups.Add([pscustomobject]@{
+                        season = $season; week = $w; owner = $owner
+                        player = $player; position = $acqRow.position
+                        fromOwner = $fromOwner
+                        weeksRostered = $weeksRostered
+                        totalPoints = Round2 $totalPoints
+                        startedPoints = Round2 $startedPoints
+                        avgPointsPerWeek = if ($weeksRostered -gt 0) { Round2 ($totalPoints / $weeksRostered) } else { 0 }
+                        stillRostered = $stillRostered
+                    })
+                }
+            }
+        }
+    }
+
+    # Pair up reciprocal inter-team moves (same season+week, opposite owner/fromOwner) as trades.
+    $trades = New-Object System.Collections.Generic.List[object]
+    $used = New-Object System.Collections.Generic.HashSet[int]
+    $interTeam = @($pickups | Where-Object { $_.fromOwner })
+    for ($x = 0; $x -lt $interTeam.Count; $x++) {
+        if ($used.Contains($x)) { continue }
+        $a = $interTeam[$x]
+        for ($y = $x + 1; $y -lt $interTeam.Count; $y++) {
+            if ($used.Contains($y)) { continue }
+            $b = $interTeam[$y]
+            if ($b.season -eq $a.season -and $b.week -eq $a.week -and $b.owner -eq $a.fromOwner -and $b.fromOwner -eq $a.owner) {
+                $trades.Add([pscustomobject]@{
+                    season = $a.season; week = $a.week
+                    teamA = [pscustomobject]@{ owner = $a.owner; received = $a.player; position = $a.position; weeksRostered = $a.weeksRostered; totalPoints = $a.totalPoints; startedPoints = $a.startedPoints; stillRostered = $a.stillRostered }
+                    teamB = [pscustomobject]@{ owner = $b.owner; received = $b.player; position = $b.position; weeksRostered = $b.weeksRostered; totalPoints = $b.totalPoints; startedPoints = $b.startedPoints; stillRostered = $b.stillRostered }
+                })
+                $used.Add($x) | Out-Null
+                $used.Add($y) | Out-Null
+                break
+            }
+        }
+    }
+
+    $tradedIndexes = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($t in $trades) {
+        $tradedIndexes.Add("$($t.season)|$($t.week)|$($t.teamA.owner)|$($t.teamA.received)") | Out-Null
+        $tradedIndexes.Add("$($t.season)|$($t.week)|$($t.teamB.owner)|$($t.teamB.received)") | Out-Null
+    }
+    $remainingPickups = @($pickups | Where-Object { -not $tradedIndexes.Contains("$($_.season)|$($_.week)|$($_.owner)|$($_.player)") })
+
+    return [ordered]@{ pickups = $remainingPickups; trades = $trades.ToArray() }
+}
+
 function New-HeadToHead {
     param([array]$Matchups)
 

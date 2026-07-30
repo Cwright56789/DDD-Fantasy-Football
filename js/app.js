@@ -5,6 +5,7 @@ const routes = {
     "standings": Views.standings,
     "teams": Views.teams,
     "matchups": Views.matchups,
+    "transactions": Views.transactions,
     "stats": Views.stats,
     "h2h": Views.h2h
 };
