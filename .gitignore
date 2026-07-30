@@ -1,0 +1,15 @@
+# The workbook contains ESPN auth cookies (espn_s2/SWID) in its Power Query
+# definitions -- never commit it, especially since this repo is public.
+*.xlsx
+*.xlsm
+~$*
+
+# Intermediate scratch extraction, regenerated from the xlsx each run.
+data/raw/
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db
+
+# Local Claude Code project settings, not part of the site
+.claude/

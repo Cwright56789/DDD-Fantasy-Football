@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DDD Fantasy Football</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap">
+    <div class="brand-row">
+      <h1>🧅 DDD Fantasy Football</h1>
+      <span class="league-full" id="league-full-name">Diplomatic. Democratic. Degenerates.</span>
+    </div>
+    <nav class="tabs" id="main-nav">
+      <a href="#/" data-route="/">Home</a>
+      <a href="#/standings" data-route="/standings">Standings</a>
+      <a href="#/teams" data-route="/teams">Teams</a>
+      <a href="#/matchups" data-route="/matchups">Matchups</a>
+      <a href="#/stats" data-route="/stats">Stats</a>
+      <a href="#/h2h" data-route="/h2h">Head-to-Head</a>
+    </nav>
+  </div>
+  <div class="updated-banner">
+    <div class="wrap" id="updated-banner-content">
+      <span class="dot"></span>Loading...
+    </div>
+  </div>
+</header>
+
+<main class="wrap" id="app">
+  <div class="spinner-text">Loading league data...</div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">Diplomatic. Democratic. Degenerates. Fantasy Football League &middot; built from our own league data</div>
+</footer>
+
+<script src="js/data.js"></script>
+<script src="js/views.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
