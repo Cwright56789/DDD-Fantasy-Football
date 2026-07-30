@@ -90,10 +90,17 @@ Views.home = async function (root) {
         matchupsHtml = `<p class="empty-state">No games yet this week.</p>`;
     }
 
-    // trophy teaser: most recent champion + onion bowl
-    const champs = owners.filter(o => o.accolades.some(a => /champion$/i.test(a) && !/co-/i.test(a)));
-    const trophyHtml = champs.map(o => {
-        const champLine = o.accolades.find(a => /champion$/i.test(a));
+    // trophy teaser: champions, most recent year first
+    const champs = owners
+        .map(o => {
+            const champLine = o.accolades.find(a => /champion$/i.test(a) && !/co-/i.test(a));
+            if (!champLine) return null;
+            const year = parseInt(champLine, 10) || 0;
+            return { owner: o, champLine, year };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.year - a.year);
+    const trophyHtml = champs.map(({ owner: o, champLine }) => {
         return `<div class="stat-tile" style="text-align:left">
             <div style="font-size:12px;color:var(--text-muted)">${fmt.escapeHtml(champLine)}</div>
             <div style="font-weight:700">${ownerLink(o.slug, o.displayName)}</div>
