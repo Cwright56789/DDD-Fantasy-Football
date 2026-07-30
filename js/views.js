@@ -61,8 +61,8 @@ function barChart(rows, { labelFn, valueFn, formatFn, maxAbs }) {
 
 // ---------------------------------------------------------------- Home
 Views.home = async function (root) {
-    const [meta, standings, matchups, owners, luck] = await Promise.all([
-        DDD.getMeta(), DDD.getStandings(), DDD.getMatchups(), DDD.getOwners(), DDD.getLuck()
+    const [meta, standings, matchups, owners, luck, fanFavorite] = await Promise.all([
+        DDD.getMeta(), DDD.getStandings(), DDD.getMatchups(), DDD.getOwners(), DDD.getLuck(), DDD.getFanFavorite()
     ]);
     const ownerMap = {}; owners.forEach(o => ownerMap[o.slug] = o);
 
@@ -107,6 +107,35 @@ Views.home = async function (root) {
         </div>`;
     }).join("");
 
+    let spotlightHtml = "";
+    if (fanFavorite) {
+        const bestOwnerName = fanFavorite.byOwner[0] ? (ownerMap[fanFavorite.byOwner[0].owner]?.displayName || fanFavorite.byOwner[0].owner) : "";
+        const bestGameOwnerName = ownerMap[fanFavorite.bestGame.owner]?.displayName || fanFavorite.bestGame.owner;
+        const ownerListHtml = fanFavorite.byOwner.map(o => `<div class="bar-row" style="margin:4px 0">
+            <div class="bar-label" style="width:140px">${ownerLink(o.owner, ownerMap[o.owner]?.displayName || o.owner)}</div>
+            <div style="font-size:12px;color:var(--text-muted);width:70px">${o.games} game${o.games === 1 ? "" : "s"}</div>
+            <div class="bar-value" style="width:auto;font-weight:700">${fmt.pts(o.points)} pts</div>
+        </div>`).join("");
+
+        spotlightHtml = `
+        <div class="card spotlight" style="align-items:flex-start">
+            <div class="spotlight-icon">⚡</div>
+            <div class="spotlight-body">
+                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;font-weight:700">League Fan Favorite</div>
+                <div style="font-size:18px;font-weight:800;margin:2px 0 8px">${fmt.escapeHtml(fanFavorite.player)}</div>
+                <div class="spotlight-stats">
+                    <div><div class="value">${fmt.pts(fanFavorite.totalPoints)}</div><div class="label">Total Pts</div></div>
+                    <div><div class="value">${fanFavorite.gamesPlayed}</div><div class="label">Games Started</div></div>
+                    <div><div class="value">${fmt.pts(fanFavorite.bestGame.points)}</div><div class="label">Best Game (${bestGameOwnerName}, S${fanFavorite.bestGame.season} W${fanFavorite.bestGame.week})</div></div>
+                    <div><div class="value">${bestOwnerName}</div><div class="label">Rostered Him Most</div></div>
+                </div>
+                <div style="margin-top:12px;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;font-weight:700">Who's Owned Him</div>
+                <div style="margin-top:4px">${ownerListHtml}</div>
+            </div>
+            <div class="spotlight-autograph">Rashid Shaheed</div>
+        </div>`;
+    }
+
     root.innerHTML = `
         <div class="two-col">
             <div>
@@ -134,6 +163,7 @@ Views.home = async function (root) {
                 </div>
             </div>
         </div>
+        ${spotlightHtml}
     `;
 };
 

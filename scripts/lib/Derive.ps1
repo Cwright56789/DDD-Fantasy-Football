@@ -328,6 +328,32 @@ function New-BenchPointsLeft {
     return [ordered]@{ bySeason = $bySeason; allTime = $allTime }
 }
 
+function New-PlayerSpotlight {
+    <# League in-joke: a permanent fan-favorite player, shown with real stats. #>
+    param([array]$Boxscores, [string]$PlayerName)
+
+    $rows = $Boxscores | Where-Object { $_.player -eq $PlayerName }
+    if ($rows.Count -eq 0) { return $null }
+
+    $bestGame = $rows | Sort-Object -Property points -Descending | Select-Object -First 1
+    $byOwner = $rows | Group-Object -Property owner | ForEach-Object {
+        [pscustomobject]@{
+            owner = $_.Name
+            games = $_.Count
+            points = Round2 (($_.Group | Measure-Object -Property points -Sum).Sum)
+        }
+    } | Sort-Object -Property games -Descending
+
+    [ordered]@{
+        player = $PlayerName
+        gamesPlayed = $rows.Count
+        totalPoints = Round2 (($rows | Measure-Object -Property points -Sum).Sum)
+        seasons = @($rows | Select-Object -ExpandProperty season -Unique | Sort-Object)
+        bestGame = [ordered]@{ points = Round2 $bestGame.points; season = $bestGame.season; week = $bestGame.week; owner = $bestGame.owner }
+        byOwner = $byOwner
+    }
+}
+
 function New-HeadToHead {
     param([array]$Matchups)
 

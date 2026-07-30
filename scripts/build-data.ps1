@@ -91,6 +91,9 @@ $benchTotals = New-BenchPointsLeft -Boxscores $boxscores
 Write-Host "Computing head-to-head..."
 $headToHead = New-HeadToHead -Matchups $matchups
 
+Write-Host "Computing player spotlight..."
+$fanFavorite = New-PlayerSpotlight -Boxscores $boxscores -PlayerName "Rashid Shaheed"
+
 # ---- owners.json: canonical identity + manual profile content ----
 Write-Host "Writing owners.json..."
 $owners = New-Object System.Collections.Generic.List[object]
@@ -184,5 +187,11 @@ $lineupEfficiency | ConvertTo-Json -Depth 4 -Compress | Set-Content -Path (Join-
 # ---- head-to-head.json ----
 Write-Host "Writing head-to-head.json..."
 $headToHead | ConvertTo-Json -Depth 4 -Compress | Set-Content -Path (Join-Path $OutDir "head-to-head.json") -Encoding utf8
+
+# ---- fan-favorite.json ----
+if ($fanFavorite) {
+    Write-Host "Writing fan-favorite.json..."
+    $fanFavorite | ConvertTo-Json -Depth 6 -Compress | Set-Content -Path (Join-Path $OutDir "fan-favorite.json") -Encoding utf8
+}
 
 Write-Host "Done. /data is ready."

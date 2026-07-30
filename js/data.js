@@ -36,6 +36,7 @@ const DDD = (function () {
         getLuck: () => loadJSON("luck.json"),
         getLineupEfficiency: () => loadJSON("lineup-efficiency.json"),
         getHeadToHead: () => loadJSON("head-to-head.json"),
+        getFanFavorite: () => loadJSON("fan-favorite.json").catch(() => null),
         getBoxscores: (season) => loadJSON(`boxscores/${season}.json`),
 
         // ---- convenience lookups, built lazily ----
