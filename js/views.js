@@ -546,6 +546,7 @@ Views.stats = async function (root, params) {
         ["luck", "Luck"],
         ["efficiency", "Lineup Efficiency"],
         ["bench", "Bench"],
+        ["projections", "Projections"],
         ["positions", "Positional Leaders"]
     ];
     root.innerHTML = `
@@ -561,6 +562,7 @@ Views.stats = async function (root, params) {
     if (tab === "luck") await Views._statsLuck(body, params.slice(1));
     else if (tab === "efficiency") await Views._statsEfficiency(body, params.slice(1));
     else if (tab === "bench") await Views._statsBench(body, params.slice(1));
+    else if (tab === "projections") await Views._statsProjections(body, params.slice(1));
     else await Views._statsPositions(body, params.slice(1));
 };
 
@@ -652,6 +654,81 @@ Views._statsBench = async function (root, params) {
             ${barChart(rows, { labelFn: r => ownerMap[r.owner] ? ownerMap[r.owner].displayName : r.owner, valueFn: r => r.points, formatFn: v => fmt.pts(v) })}
         </div>
     `;
+};
+
+const MIN_PROJECTION_FOR_PCT = 1; // exclude near-zero projections from % comparisons (e.g. projected 0, scored 0.1)
+
+Views._statsProjections = async function (root, params) {
+    const [meta, owners] = await Promise.all([DDD.getMeta(), DDD.getOwners()]);
+    const ownerMap = {}; owners.forEach(o => ownerMap[o.slug] = o);
+
+    const seasonOptions = [...meta.seasons].sort((a, b) => b - a);
+    const season = Number(params[0]) || seasonOptions[0];
+    const boxscores = await DDD.getBoxscores(season);
+    const weeksForSeason = [...new Set(boxscores.map(r => r.week))].sort((a, b) => a - b);
+    const week = Number(params[1]) || (weeksForSeason.includes(meta.currentWeek) ? meta.currentWeek : weeksForSeason[weeksForSeason.length - 1]);
+
+    const rows = boxscores
+        .filter(r => r.week === week && r.projectedPoints !== null && r.projectedPoints !== undefined)
+        .map(r => ({ ...r, diff: r.points - r.projectedPoints }));
+    const pctEligible = rows.filter(r => Math.abs(r.projectedPoints) >= MIN_PROJECTION_FOR_PCT)
+        .map(r => ({ ...r, pctDiff: r.diff / r.projectedPoints }));
+
+    function table(list, valueLabel, valueFn) {
+        return `<table class="data">
+            <thead><tr><th class="left">Player</th><th class="left">Owner</th><th>Pos</th><th>Proj</th><th>Actual</th><th>${valueLabel}</th></tr></thead>
+            <tbody>${list.map(r => `<tr>
+                <td class="left">${fmt.escapeHtml(r.player)}</td>
+                <td class="left">${ownerLink(r.owner, ownerMap[r.owner]?.displayName || r.owner)}</td>
+                <td>${fmt.escapeHtml(r.position)}</td>
+                <td>${fmt.pts(r.projectedPoints)}</td>
+                <td>${fmt.pts(r.points)}</td>
+                <td><strong>${valueFn(r)}</strong></td>
+            </tr>`).join("")}</tbody>
+        </table>`;
+    }
+
+    const biggestBeat = [...rows].sort((a, b) => b.diff - a.diff).slice(0, 10);
+    const biggestBust = [...rows].sort((a, b) => a.diff - b.diff).slice(0, 10);
+    const bestPct = [...pctEligible].sort((a, b) => b.pctDiff - a.pctDiff).slice(0, 10);
+    const worstPct = [...pctEligible].sort((a, b) => a.pctDiff - b.pctDiff).slice(0, 10);
+
+    root.innerHTML = `
+        <div class="card">
+            <div class="toolbar">
+                <select id="proj-season">${seasonOptions.map(s => `<option value="${s}" ${s === season ? "selected" : ""}>${s}</option>`).join("")}</select>
+                <select id="proj-week">${weeksForSeason.map(w => `<option value="${w}" ${w === week ? "selected" : ""}>Week ${w}</option>`).join("")}</select>
+            </div>
+            <p style="color:var(--text-muted);font-size:13px">How every rostered player did against their preseason-of-that-week ESPN projection. Percentage comparisons exclude players projected for under ${MIN_PROJECTION_FOR_PCT} point, since a tiny projection makes the % swing meaningless (e.g. projected 0, scored 0.1).</p>
+        </div>
+        <div class="two-col">
+            <div class="card">
+                <h3>📈 Biggest Beat (points)</h3>
+                <div class="table-scroll">${table(biggestBeat, "+/-", r => fmt.signed(r.diff))}</div>
+            </div>
+            <div class="card">
+                <h3>📉 Biggest Bust (points)</h3>
+                <div class="table-scroll">${table(biggestBust, "+/-", r => fmt.signed(r.diff))}</div>
+            </div>
+        </div>
+        <div class="two-col">
+            <div class="card">
+                <h3>🚀 Best Beat (%)</h3>
+                <div class="table-scroll">${table(bestPct, "%", r => fmt.signed(r.pctDiff * 100, 0) + "%")}</div>
+            </div>
+            <div class="card">
+                <h3>💩 Worst Bust (%)</h3>
+                <div class="table-scroll">${table(worstPct, "%", r => fmt.signed(r.pctDiff * 100, 0) + "%")}</div>
+            </div>
+        </div>
+    `;
+
+    document.getElementById("proj-season").addEventListener("change", (e) => {
+        location.hash = `#/stats/projections/${e.target.value}`;
+    });
+    document.getElementById("proj-week").addEventListener("change", (e) => {
+        location.hash = `#/stats/projections/${season}/${e.target.value}`;
+    });
 };
 
 Views._statsPositions = async function (root) {

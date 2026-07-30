@@ -62,6 +62,7 @@ foreach ($b in $rawBoxscores) {
         position = $b.Position
         slot = $b.Slot
         points = [double]$b.Points
+        projectedPoints = if ($null -ne $b.ProjectedPoints) { [double]$b.ProjectedPoints } else { $null }
     })
 }
 if ($emptySlotCount -gt 0) { Write-Host "  skipped $emptySlotCount empty roster-slot rows" }
