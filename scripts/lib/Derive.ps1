@@ -569,6 +569,8 @@ function New-VerifiedTrades {
     $seen = New-Object System.Collections.Generic.HashSet[string]
     foreach ($r in $ArchiveRows) {
         if (-not $r."From Owner" -or -not $r."To Owner") { continue } # not a team-to-team move
+        if (-not $r."Target Name") { continue } # unresolved target = a draft pick, not a player; not tracked
+
         $fromOwner = ConvertTo-OwnerSlug $r."From Owner"
         $toOwner = ConvertTo-OwnerSlug $r."To Owner"
         $targetId = $r."Target ID"
@@ -584,7 +586,7 @@ function New-VerifiedTrades {
             dayKey = $dayKey
             fromOwner = $fromOwner
             toOwner = $toOwner
-            asset = if ($r."Target Name") { $r."Target Name" } else { "Draft pick / unresolved asset" }
+            asset = $r."Target Name"
         })
     }
 
@@ -605,7 +607,10 @@ function New-VerifiedTrades {
         $ownerA, $ownerB = $pair[0], $pair[1]
         $aReceived = @($items | Where-Object { $_.toOwner -eq $ownerA } | ForEach-Object { $_.asset })
         $bReceived = @($items | Where-Object { $_.toOwner -eq $ownerB } | ForEach-Object { $_.asset })
-        if ($aReceived.Count -eq 0 -and $bReceived.Count -eq 0) { continue }
+        # Both sides must have at least one real player; a trade that was
+        # entirely (or partly) draft picks and got filtered down to players
+        # on only one side isn't a meaningful player-for-player trade to show.
+        if ($aReceived.Count -eq 0 -or $bReceived.Count -eq 0) { continue }
 
         $trades.Add([pscustomobject]@{
             season = $items[0].season

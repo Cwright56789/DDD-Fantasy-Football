@@ -442,7 +442,7 @@ Views.transactions = async function (root, params) {
             <h2>Waiver Wire &amp; Trades</h2>
             <p style="color:var(--text-muted);font-size:13px">
                 <strong>A note on accuracy:</strong> ESPN's real activity log only retains a rolling ~2-month window, so the 2023-2025 seasons can't be pulled from it &mdash; those trades are <em>inferred</em> from week-to-week roster changes instead (a "trade" means players swapped rosters the same week between two teams). Multi-player swaps are essentially certain to be real trades; single 1-for-1 swaps are flagged as lower-confidence since they could occasionally be coincidental, unrelated waiver moves.
-                Starting with the 2026 season, trades are pulled directly from ESPN's real transaction log and archived permanently here, so they'll only get more accurate and complete as the season goes on &mdash; no more guessing.
+                Starting with the 2026 season, trades are pulled directly from ESPN's real transaction log and archived permanently here, so they'll only get more accurate and complete as the season goes on &mdash; no more guessing. Draft-pick-only trades aren't tracked here (this page is about player value, not picks).
             </p>
             <div class="toolbar">
                 <button class="btn ${subTab === "pickups" ? "active" : ""}" onclick="location.hash='#/transactions/pickups/${selected}'">Waiver Pickups</button>
