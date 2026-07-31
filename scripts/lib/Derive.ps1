@@ -646,6 +646,46 @@ function New-PlayerIndex {
     return $result
 }
 
+function New-DraftRetrospective {
+    <#
+        Joins real ESPN draft picks to actual season performance: how many
+        points did each drafted player score for the team that drafted them,
+        that season (any team, in case of an in-season trade away).
+    #>
+    param([array]$DraftRows, [array]$Boxscores)
+
+    if (-not $DraftRows -or $DraftRows.Count -eq 0) { return @() }
+
+    # points scored by player, that season, regardless of which owner had them that week
+    $pointsByPlayerSeason = @{}
+    foreach ($b in $Boxscores) {
+        $key = "$($b.season)|$($b.player)"
+        if (-not $pointsByPlayerSeason.ContainsKey($key)) { $pointsByPlayerSeason[$key] = 0.0 }
+        $pointsByPlayerSeason[$key] += $b.points
+    }
+
+    $result = New-Object System.Collections.Generic.List[object]
+    foreach ($r in $DraftRows) {
+        if (-not $r.Player -or -not $r.Owner) { continue }
+        $season = [int]$r.Season
+        $owner = ConvertTo-OwnerSlug $r.Owner
+        $key = "$season|$($r.Player)"
+        $points = if ($pointsByPlayerSeason.ContainsKey($key)) { Round2 $pointsByPlayerSeason[$key] } else { 0 }
+
+        $result.Add([pscustomobject]@{
+            season = $season
+            overallPick = [int]$r."Overall Pick"
+            round = [int]$r.Round
+            roundPick = [int]$r."Round Pick"
+            owner = $owner
+            player = $r.Player
+            keeper = ($r.Keeper -eq "TRUE")
+            seasonPoints = $points
+        })
+    }
+    return $result.ToArray()
+}
+
 function New-HeadToHead {
     param([array]$Matchups)
 

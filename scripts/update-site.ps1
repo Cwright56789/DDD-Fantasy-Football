@@ -50,6 +50,10 @@ try {
 Step "Pulling ESPN's real transaction log for the current season..."
 & (Join-Path $PSScriptRoot "fetch-transactions.ps1") -XlsxPath $XlsxPath
 
+# ---------------------------------------------------------------- 2b. Draft results
+Step "Pulling real ESPN draft results..."
+& (Join-Path $PSScriptRoot "fetch-draft.ps1") -XlsxPath $XlsxPath
+
 # ---------------------------------------------------------------- 3. Rebuild /data
 Step "Rebuilding site data from the refreshed workbook..."
 & (Join-Path $PSScriptRoot "xlsx-to-json.ps1") -XlsxPath $XlsxPath

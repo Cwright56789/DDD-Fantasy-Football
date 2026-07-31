@@ -98,6 +98,15 @@ $headToHead = New-HeadToHead -Matchups $matchups
 Write-Host "Computing player index..."
 $playerIndex = New-PlayerIndex -Boxscores $boxscores
 
+$draftArchivePath = Join-Path $PSScriptRoot "..\data\archive\draft-picks-raw.json"
+$draftRetro = @()
+if (Test-Path $draftArchivePath) {
+    Write-Host "Computing draft retrospective..."
+    $draftRows = Get-Content $draftArchivePath -Raw | ConvertFrom-Json
+    $draftRetro = New-DraftRetrospective -DraftRows $draftRows -Boxscores $boxscores
+    Write-Host "  $($draftRetro.Count) draft picks with performance data"
+}
+
 Write-Host "Computing player spotlight..."
 $fanFavorite = New-PlayerSpotlight -Boxscores $boxscores -PlayerName "Rashid Shaheed"
 
@@ -209,6 +218,11 @@ $headToHead | ConvertTo-Json -Depth 4 -Compress | Set-Content -Path (Join-Path $
 
 Write-Host "Writing player-index.json..."
 $playerIndex | ConvertTo-Json -Depth 4 -Compress | Set-Content -Path (Join-Path $OutDir "player-index.json") -Encoding utf8
+
+if ($draftRetro.Count -gt 0) {
+    Write-Host "Writing draft-retrospective.json..."
+    $draftRetro | ConvertTo-Json -Depth 4 -Compress | Set-Content -Path (Join-Path $OutDir "draft-retrospective.json") -Encoding utf8
+}
 
 # ---- bench-mistakes.json ----
 Write-Host "Writing bench-mistakes.json..."

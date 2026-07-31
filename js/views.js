@@ -582,6 +582,77 @@ Views.playoffs = async function (root, params) {
     `;
 };
 
+// ---------------------------------------------------------------- Draft Retrospective
+Views.draft = async function (root, params) {
+    const [meta, owners, allPicks] = await Promise.all([DDD.getMeta(), DDD.getOwners(), DDD.getDraftRetrospective()]);
+    const ownerMap = {}; owners.forEach(o => ownerMap[o.slug] = o);
+
+    if (!allPicks.length) {
+        root.innerHTML = `<p class="empty-state">No draft data available yet.</p>`;
+        return;
+    }
+
+    const seasonOptions = [...new Set(allPicks.map(p => p.season))].sort((a, b) => b - a);
+    const season = Number(params[0]) || seasonOptions[0];
+    const picks = allPicks.filter(p => p.season === season).sort((a, b) => a.overallPick - b.overallPick);
+
+    // best pick at each round
+    const byRound = {};
+    picks.forEach(p => { if (!byRound[p.round] || p.seasonPoints > byRound[p.round].seasonPoints) byRound[p.round] = p; });
+    const bestByRound = Object.values(byRound).sort((a, b) => a.round - b.round);
+
+    const lateRoundSteals = [...picks].filter(p => p.round >= 5).sort((a, b) => b.seasonPoints - a.seasonPoints).slice(0, 10);
+    const earlyRoundBusts = [...picks].filter(p => p.round <= 4).sort((a, b) => a.seasonPoints - b.seasonPoints).slice(0, 10);
+
+    function pickRow(p, showRound) {
+        return `<tr>
+            <td>${p.overallPick}</td>
+            ${showRound ? `<td>R${p.round}.${p.roundPick}</td>` : ""}
+            <td class="left">${fmt.escapeHtml(p.player)}${p.keeper ? ` <span class="badge">keeper</span>` : ""}</td>
+            <td class="left">${ownerLink(p.owner, ownerMap[p.owner]?.displayName || p.owner)}</td>
+            <td><strong>${fmt.pts(p.seasonPoints)}</strong></td>
+        </tr>`;
+    }
+
+    root.innerHTML = `
+        <div class="card">
+            <h2>Draft Retrospective</h2>
+            <div class="toolbar">
+                ${seasonOptions.map(s => `<button class="btn ${s === season ? "active" : ""}" onclick="location.hash='#/draft/${s}'">${s}</button>`).join("")}
+            </div>
+            <p style="color:var(--text-muted);font-size:13px">How every drafted player actually performed that season, regardless of who ended up with them by season's end.</p>
+        </div>
+        <div class="two-col">
+            <div class="card">
+                <h3>💎 Best Value (Round 5+)</h3>
+                <table class="data"><thead><tr><th>Pick</th><th class="left">Player</th><th class="left">Owner</th><th>Pts</th></tr></thead>
+                    <tbody>${lateRoundSteals.map(p => pickRow(p, false)).join("")}</tbody>
+                </table>
+            </div>
+            <div class="card">
+                <h3>💩 Biggest Busts (Round 1-4)</h3>
+                <table class="data"><thead><tr><th>Pick</th><th class="left">Player</th><th class="left">Owner</th><th>Pts</th></tr></thead>
+                    <tbody>${earlyRoundBusts.map(p => pickRow(p, false)).join("")}</tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card">
+            <h3>Best Pick Of Each Round</h3>
+            <table class="data"><thead><tr><th>Pick</th><th>Round</th><th class="left">Player</th><th class="left">Owner</th><th>Pts</th></tr></thead>
+                <tbody>${bestByRound.map(p => pickRow(p, true)).join("")}</tbody>
+            </table>
+        </div>
+        <div class="card">
+            <h3>Full Draft Board</h3>
+            <div class="table-scroll">
+                <table class="data"><thead><tr><th>Pick</th><th>Round</th><th class="left">Player</th><th class="left">Owner</th><th>Pts</th></tr></thead>
+                    <tbody>${picks.map(p => pickRow(p, true)).join("")}</tbody>
+                </table>
+            </div>
+        </div>
+    `;
+};
+
 // ---------------------------------------------------------------- Transactions
 Views.transactions = async function (root, params) {
     const [meta, owners, tx] = await Promise.all([DDD.getMeta(), DDD.getOwners(), DDD.getTransactions()]);
