@@ -489,6 +489,99 @@ Views.matchups = async function (root, params) {
     });
 };
 
+// ---------------------------------------------------------------- Playoffs / Onion Bowl
+const REGULAR_SEASON_WEEKS = 14; // confirmed via ESPN league settings (matchupPeriodCount), stable across seasons
+const PLAYOFF_TEAM_COUNT = 6;
+
+function seedStandings(matchups, season) {
+    const regRows = matchups.filter(m => m.season === season && m.week <= REGULAR_SEASON_WEEKS);
+    const acc = {};
+    regRows.forEach(m => {
+        [["awayOwner", "awayPts", "homeOwner", "homePts"], ["homeOwner", "homePts", "awayOwner", "awayPts"]].forEach(([oKey, pKey, oppKey, oppPKey]) => {
+            const owner = m[oKey];
+            if (!owner) return;
+            if (!acc[owner]) acc[owner] = { owner, wins: 0, losses: 0, ties: 0, points: 0 };
+            acc[owner].points += m[pKey];
+            const won = m.winner === (oKey === "awayOwner" ? "AWAY" : "HOME");
+            const tied = m.winner === "TIE";
+            if (tied) acc[owner].ties++;
+            else if (won) acc[owner].wins++;
+            else acc[owner].losses++;
+        });
+    });
+    const rows = Object.values(acc).sort((a, b) => (b.wins - a.wins) || (b.points - a.points));
+    rows.forEach((r, i) => r.seed = i + 1);
+    return rows;
+}
+
+Views.playoffs = async function (root, params) {
+    const [meta, matchups, owners] = await Promise.all([DDD.getMeta(), DDD.getMatchups(), DDD.getOwners()]);
+    const ownerMap = {}; owners.forEach(o => ownerMap[o.slug] = o);
+
+    const seasonOptions = [...meta.seasons].sort((a, b) => b - a);
+    const season = Number(params[0]) || seasonOptions[0];
+
+    const seeds = seedStandings(matchups, season);
+    const seedOf = {}; seeds.forEach(r => { seedOf[r.owner] = r.seed; });
+    const playoffOwners = new Set(seeds.filter(r => r.seed <= PLAYOFF_TEAM_COUNT).map(r => r.owner));
+
+    const postseason = matchups.filter(m => m.season === season && m.week > REGULAR_SEASON_WEEKS && m.awayOwner)
+        .sort((a, b) => a.week - b.week);
+
+    const playoffGames = postseason.filter(m => playoffOwners.has(m.awayOwner) && playoffOwners.has(m.homeOwner));
+    const consolationGames = postseason.filter(m => !playoffOwners.has(m.awayOwner) && !playoffOwners.has(m.homeOwner));
+
+    // The champion / Onion Bowl winner-loser come from each owner's accolades
+    // (already verified correct), not from guessing ESPN's exact bracket-tree
+    // structure -- with byes and placement games sharing the same week, that
+    // structure isn't reliably reconstructable from matchup results alone.
+    function findByAccolade(pattern) { return owners.find(o => o.accolades.some(a => pattern.test(a) && a.includes(String(season))))?.slug; }
+    const champion = findByAccolade(/Champion$/);
+    const onionWinner = findByAccolade(/Onion Bowl Winner$/);
+    const onionLoser = findByAccolade(/Onion Bowl Loser$/);
+
+    function gamesByWeek(games) {
+        const byWeek = {};
+        games.forEach(g => { if (!byWeek[g.week]) byWeek[g.week] = []; byWeek[g.week].push(g); });
+        return Object.keys(byWeek).map(Number).sort((a, b) => a - b).map(w => ({ week: w, games: byWeek[w] }));
+    }
+
+    function section(games) {
+        return gamesByWeek(games).map(({ week, games }) => `
+            <div class="section-title">Week ${week}</div>
+            <div class="grid cols-2">${games.map(g => {
+                const aWin = g.winner === "AWAY", bWin = g.winner === "HOME";
+                return `<div class="card" style="padding:12px 14px">
+                    <div style="display:flex;justify-content:space-between;font-weight:${aWin ? 700 : 400}">
+                        <span>(${seedOf[g.awayOwner] || "?"}) ${ownerLine(g.awayOwner, ownerMap)}</span><span>${fmt.pts(g.awayPts)}</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;font-weight:${bWin ? 700 : 400};margin-top:4px">
+                        <span>(${seedOf[g.homeOwner] || "?"}) ${ownerLine(g.homeOwner, ownerMap)}</span><span>${fmt.pts(g.homePts)}</span>
+                    </div>
+                </div>`;
+            }).join("")}</div>
+        `).join("");
+    }
+
+    root.innerHTML = `
+        <div class="card">
+            <h2>Playoffs &amp; Onion Bowl</h2>
+            <div class="toolbar">
+                ${seasonOptions.map(s => `<button class="btn ${s === season ? "active" : ""}" onclick="location.hash='#/playoffs/${s}'">${s}</button>`).join("")}
+            </div>
+            <p style="color:var(--text-muted);font-size:13px">Seeds 1-${PLAYOFF_TEAM_COUNT} made the playoffs (by regular-season record through Week ${REGULAR_SEASON_WEEKS}, ties broken by points); the rest play down in the Onion Bowl ladder. Games are grouped by week, not by bracket round &mdash; ESPN's exact bracket tree (who has a bye, which game is the "real" final vs. a placement game) isn't reconstructable from the results alone when several games share a week, so seeds are shown on every game instead of guessing round labels.</p>
+            <div class="grid cols-2">
+                ${champion ? `<div class="stat-tile" style="text-align:left"><div class="label" style="margin-top:0">🏆 Champion</div><div class="value" style="font-size:18px">${ownerLine(champion, ownerMap)}</div></div>` : ""}
+                ${onionWinner ? `<div class="stat-tile" style="text-align:left"><div class="label" style="margin-top:0">🧅 Onion Bowl</div><div class="value" style="font-size:14px">${ownerLine(onionWinner, ownerMap)} beat ${ownerLine(onionLoser, ownerMap)}</div></div>` : ""}
+            </div>
+        </div>
+        <h2>🏆 Playoff Games (Seeds 1-${PLAYOFF_TEAM_COUNT})</h2>
+        ${playoffGames.length ? section(playoffGames) : `<p class="empty-state">Playoffs haven't started yet this season.</p>`}
+        <h2 style="margin-top:22px">🧅 Onion Bowl Ladder (Seeds ${PLAYOFF_TEAM_COUNT + 1}-12)</h2>
+        ${consolationGames.length ? section(consolationGames) : `<p class="empty-state">Not decided yet this season.</p>`}
+    `;
+};
+
 // ---------------------------------------------------------------- Transactions
 Views.transactions = async function (root, params) {
     const [meta, owners, tx] = await Promise.all([DDD.getMeta(), DDD.getOwners(), DDD.getTransactions()]);

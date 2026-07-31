@@ -6,6 +6,7 @@ const routes = {
     "teams": Views.teams,
     "matchups": Views.matchups,
     "transactions": Views.transactions,
+    "playoffs": Views.playoffs,
     "stats": Views.stats,
     "h2h": Views.h2h,
     "player": Views.player,
