@@ -473,7 +473,7 @@ Views._transactionsPickups = function (root, tx, ownerMap, selected) {
                 <table class="data">
                     <thead><tr>
                         <th class="left">Owner</th><th class="left">Player</th><th>Pos</th>
-                        <th class="left">Acquired</th><th>Weeks Rostered</th><th>Total Pts</th><th>Started Pts</th><th>Pts/Wk</th><th></th>
+                        <th class="left">Acquired</th><th>Weeks Rostered</th><th>Total Pts</th><th>Started Pts</th><th>Pts/Wk</th>
                     </tr></thead>
                     <tbody>${rows.map(r => `<tr>
                         <td class="left">${ownerLink(r.owner, ownerMap[r.owner]?.displayName || r.owner)}</td>
@@ -484,7 +484,6 @@ Views._transactionsPickups = function (root, tx, ownerMap, selected) {
                         <td><strong>${fmt.pts(r.totalPoints)}</strong></td>
                         <td>${fmt.pts(r.startedPoints)}</td>
                         <td>${fmt.pts(r.avgPointsPerWeek)}</td>
-                        <td>${r.stillRostered ? `<span class="badge">still rostered</span>` : ""}</td>
                     </tr>`).join("")}</tbody>
                 </table>
             </div>
