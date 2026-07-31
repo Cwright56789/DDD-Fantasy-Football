@@ -314,7 +314,7 @@ Views.teams = async function (root) {
 
 Views.teamProfile = async function (root, params) {
     const slug = params[0];
-    const [owners, profiles, standings] = await Promise.all([DDD.getOwners(), DDD.getProfiles(), DDD.getStandings()]);
+    const [owners, profiles, standings, leagueBadges] = await Promise.all([DDD.getOwners(), DDD.getProfiles(), DDD.getStandings(), computeLeagueBadges()]);
     const owner = owners.find(o => o.slug === slug);
     const profile = profiles.find(p => p.owner === slug);
 
@@ -381,10 +381,14 @@ Views.teamProfile = async function (root, params) {
         </tr>`).join("")}</tbody>
     </table>`;
 
+    const myBadges = leagueBadges[slug] || [];
+    const badgesHtml = myBadges.length ? `<div class="trophy-row" style="margin-top:8px">${myBadges.map(b => `<span class="badge trophy">${b.icon} ${fmt.escapeHtml(b.label)}</span>`).join("")}</div>` : "";
+
     root.innerHTML = `
         <div class="card">
             <h1 style="margin:2px 0 10px">${fmt.escapeHtml(owner.displayName)}</h1>
             <div class="trophy-row">${trophyBadges(owner.accolades)}</div>
+            ${badgesHtml}
         </div>
         <div class="card"><h2>Season Records</h2><div class="table-scroll">${seasonTable}</div></div>
         <div class="card"><h2>Career Highlights</h2>${highlightsHtml}</div>
@@ -859,6 +863,97 @@ Views._statsPositions = async function (root) {
 
     root.innerHTML = sections;
 };
+
+// Net trade value per owner across all heuristic (2023-2025) trades, unfiltered
+// by any personal exclusion toggles -- used for the objective league badges.
+function computeNetTradeValueByOwner(trades) {
+    const heuristic = trades.filter(t => !t.verified);
+    const groups = {};
+    heuristic.forEach(t => {
+        const pair = [t.teamA.owner, t.teamB.owner].sort().join("|");
+        const key = `${t.season}|${t.week}|${pair}`;
+        if (!groups[key]) groups[key] = { owners: pair.split("|"), items: [] };
+        groups[key].items.push(t);
+    });
+    const netValue = {};
+    Object.values(groups).forEach(g => {
+        const [ownerA, ownerB] = g.owners;
+        const aTotal = g.items.reduce((s, it) => s + (it.teamA.owner === ownerA ? it.teamA.totalPoints : it.teamB.totalPoints), 0);
+        const bTotal = g.items.reduce((s, it) => s + (it.teamA.owner === ownerB ? it.teamA.totalPoints : it.teamB.totalPoints), 0);
+        netValue[ownerA] = (netValue[ownerA] || 0) + (aTotal - bTotal);
+        netValue[ownerB] = (netValue[ownerB] || 0) + (bTotal - aTotal);
+    });
+    return netValue;
+}
+
+// ---------------------------------------------------------------- Career badges (league records)
+let _leagueBadgesCache = null;
+async function computeLeagueBadges() {
+    if (_leagueBadgesCache) return _leagueBadgesCache;
+
+    const [profiles, lineupEfficiency, transactions] = await Promise.all([
+        DDD.getProfiles(), DDD.getLineupEfficiency(), DDD.getTransactions()
+    ]);
+
+    const badges = {}; // ownerSlug -> [{icon, label}]
+    function award(owner, icon, label) {
+        if (!owner) return;
+        if (!badges[owner]) badges[owner] = [];
+        badges[owner].push({ icon, label });
+    }
+    function best(list, keyFn, compareBetter) {
+        let bestItem = null, bestVal = null;
+        list.forEach(item => {
+            const v = keyFn(item);
+            if (v === null || v === undefined) return;
+            if (bestVal === null || compareBetter(v, bestVal)) { bestVal = v; bestItem = item; }
+        });
+        return bestItem;
+    }
+    const higher = (a, b) => a > b;
+    const lower = (a, b) => a < b;
+
+    const withHighest = profiles.filter(p => p.careerHighlights?.highestScore);
+    award(best(withHighest, p => p.careerHighlights.highestScore.points, higher)?.owner, "🔥", "Highest Score Ever");
+    award(best(withHighest, p => p.careerHighlights.lowestScore.points, lower)?.owner, "🥶", "Lowest Score Ever");
+
+    const withMargin = profiles.filter(p => p.careerHighlights?.biggestMarginOfVictory);
+    award(best(withMargin, p => p.careerHighlights.biggestMarginOfVictory.margin, higher)?.owner, "💥", "Biggest Blowout Ever");
+    const withWorstLoss = profiles.filter(p => p.careerHighlights?.worstBlowoutLoss);
+    award(best(withWorstLoss, p => p.careerHighlights.worstBlowoutLoss.margin, lower)?.owner, "😵", "Worst Blowout Loss Ever");
+
+    const withClosestWin = profiles.filter(p => p.careerHighlights?.closestWin);
+    award(best(withClosestWin, p => p.careerHighlights.closestWin.margin, lower)?.owner, "⚡", "Clutch (Closest Win Ever)");
+    const withClosestLoss = profiles.filter(p => p.careerHighlights?.closestLoss);
+    award(best(withClosestLoss, p => p.careerHighlights.closestLoss.margin, higher)?.owner, "💔", "Heartbreak (Closest Loss Ever)");
+
+    award(best(profiles, p => p.allTime.benchPoints, higher)?.owner, "🪑", "Human Bench");
+    award(best(profiles, p => p.allTime.luck, higher)?.owner, "🍀", "Luckiest Ever");
+    award(best(profiles, p => p.allTime.luck, lower)?.owner, "💀", "Unluckiest Ever");
+
+    // avg lineup efficiency all-time
+    const effByOwner = {};
+    lineupEfficiency.forEach(r => {
+        if (!effByOwner[r.owner]) effByOwner[r.owner] = { sum: 0, n: 0 };
+        effByOwner[r.owner].sum += r.efficiencyPct || 0;
+        effByOwner[r.owner].n++;
+    });
+    const effRows = Object.keys(effByOwner).map(owner => ({ owner, avg: effByOwner[owner].sum / effByOwner[owner].n }));
+    award(best(effRows, r => r.avg, higher)?.owner, "🎯", "Most Efficient Manager Ever");
+
+    // net trade value
+    const netValue = computeNetTradeValueByOwner(transactions.trades);
+    const netRows = Object.keys(netValue).map(owner => ({ owner, value: netValue[owner] }));
+    award(best(netRows, r => r.value, higher)?.owner, "💰", "Trade Shark");
+    award(best(netRows, r => r.value, lower)?.owner, "🩸", "Trade Victim");
+
+    // best single waiver pickup
+    const pickups = transactions.pickups.filter(p => !p.fromOwner);
+    award(best(pickups, p => p.totalPoints, higher)?.owner, "🎣", "Waiver Wire Wizard");
+
+    _leagueBadgesCache = badges;
+    return badges;
+}
 
 // ---------------------------------------------------------------- Rivalries
 const RIVAL_PAIRS = [
