@@ -624,6 +624,28 @@ function New-VerifiedTrades {
     return $trades.ToArray()
 }
 
+function New-PlayerIndex {
+    <# Compact per-player summary for the site search bar. #>
+    param([array]$Boxscores)
+
+    $result = New-Object System.Collections.Generic.List[object]
+    foreach ($g in ($Boxscores | Group-Object -Property player)) {
+        $rows = $g.Group
+        $totalPoints = ($rows | Measure-Object -Property points -Sum).Sum
+        $position = ($rows | Group-Object -Property position | Sort-Object Count -Descending | Select-Object -First 1).Name
+        $seasons = @($rows | Select-Object -ExpandProperty season -Unique | Sort-Object)
+        $owners = @($rows | Select-Object -ExpandProperty owner -Unique)
+        $result.Add([pscustomobject]@{
+            player = $g.Name
+            position = $position
+            totalPoints = Round2 $totalPoints
+            seasons = $seasons
+            owners = $owners
+        })
+    }
+    return $result
+}
+
 function New-HeadToHead {
     param([array]$Matchups)
 

@@ -39,6 +39,7 @@ const DDD = (function () {
         getFanFavorite: () => loadJSON("fan-favorite.json").catch(() => null),
         getBenchMistakes: () => loadJSON("bench-mistakes.json"),
         getTransactions: () => loadJSON("transactions.json"),
+        getPlayerIndex: () => loadJSON("player-index.json"),
         getBoxscores: (season) => loadJSON(`boxscores/${season}.json`),
 
         // ---- convenience lookups, built lazily ----

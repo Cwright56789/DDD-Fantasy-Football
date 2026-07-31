@@ -7,7 +7,8 @@ const routes = {
     "matchups": Views.matchups,
     "transactions": Views.transactions,
     "stats": Views.stats,
-    "h2h": Views.h2h
+    "h2h": Views.h2h,
+    "player": Views.player
 };
 
 function parseHash() {
@@ -69,5 +70,6 @@ async function initBanner() {
 window.addEventListener("hashchange", render);
 window.addEventListener("DOMContentLoaded", () => {
     initBanner();
+    initSiteSearch();
     render();
 });

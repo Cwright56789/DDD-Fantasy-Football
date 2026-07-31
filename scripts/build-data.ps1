@@ -95,6 +95,9 @@ $benchMistakes = New-WeeklyBenchMistakes -Boxscores $boxscores -TeamWeekScores $
 Write-Host "Computing head-to-head..."
 $headToHead = New-HeadToHead -Matchups $matchups
 
+Write-Host "Computing player index..."
+$playerIndex = New-PlayerIndex -Boxscores $boxscores
+
 Write-Host "Computing player spotlight..."
 $fanFavorite = New-PlayerSpotlight -Boxscores $boxscores -PlayerName "Rashid Shaheed"
 
@@ -203,6 +206,9 @@ $lineupEfficiency | ConvertTo-Json -Depth 4 -Compress | Set-Content -Path (Join-
 # ---- head-to-head.json ----
 Write-Host "Writing head-to-head.json..."
 $headToHead | ConvertTo-Json -Depth 4 -Compress | Set-Content -Path (Join-Path $OutDir "head-to-head.json") -Encoding utf8
+
+Write-Host "Writing player-index.json..."
+$playerIndex | ConvertTo-Json -Depth 4 -Compress | Set-Content -Path (Join-Path $OutDir "player-index.json") -Encoding utf8
 
 # ---- bench-mistakes.json ----
 Write-Host "Writing bench-mistakes.json..."

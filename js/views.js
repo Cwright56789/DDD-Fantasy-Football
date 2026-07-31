@@ -903,3 +903,127 @@ Views.h2h = async function (root) {
         </div>
     `;
 };
+
+// ---------------------------------------------------------------- Player profile (from search)
+Views.player = async function (root, params) {
+    const playerName = decodeURIComponent(params[0] || "");
+    const [owners, playerIndex] = await Promise.all([DDD.getOwners(), DDD.getPlayerIndex()]);
+    const ownerMap = {}; owners.forEach(o => ownerMap[o.slug] = o);
+
+    const entry = playerIndex.find(p => p.player === playerName);
+    if (!entry) {
+        root.innerHTML = `<p class="empty-state">No data found for "${fmt.escapeHtml(playerName)}".</p>`;
+        return;
+    }
+
+    const boxscoresBySeason = await Promise.all(entry.seasons.map(s => DDD.getBoxscores(s)));
+    const rows = boxscoresBySeason.flat().filter(r => r.player === playerName).sort((a, b) => (b.season - a.season) || (a.week - b.week));
+
+    const bySeason = {};
+    rows.forEach(r => {
+        if (!bySeason[r.season]) bySeason[r.season] = { points: 0, games: 0, owners: new Set() };
+        bySeason[r.season].points += r.points;
+        bySeason[r.season].games++;
+        bySeason[r.season].owners.add(r.owner);
+    });
+    const seasonRows = Object.keys(bySeason).map(Number).sort((a, b) => b - a).map(s => ({
+        season: s, points: bySeason[s].points, games: bySeason[s].games, owners: [...bySeason[s].owners]
+    }));
+
+    const bestGame = [...rows].sort((a, b) => b.points - a.points)[0];
+
+    root.innerHTML = `
+        <div class="card">
+            <h1 style="margin:2px 0 10px">${fmt.escapeHtml(playerName)}</h1>
+            <div style="color:var(--text-muted);font-size:13px">${fmt.escapeHtml(entry.position)} &middot; ${fmt.pts(entry.totalPoints)} career points across this league</div>
+        </div>
+        <div class="card">
+            <h2>Season Breakdown</h2>
+            <table class="data">
+                <thead><tr><th class="left">Season</th><th class="left">Roster(s)</th><th>Games</th><th>Total Pts</th></tr></thead>
+                <tbody>${seasonRows.map(s => `<tr>
+                    <td class="left">${s.season}</td>
+                    <td class="left">${s.owners.map(o => ownerLink(o, ownerMap[o]?.displayName || o)).join(", ")}</td>
+                    <td>${s.games}</td>
+                    <td><strong>${fmt.pts(s.points)}</strong></td>
+                </tr>`).join("")}</tbody>
+            </table>
+        </div>
+        ${bestGame ? `<div class="card">
+            <h2>Best Game</h2>
+            <div style="font-size:20px;font-weight:800">${fmt.pts(bestGame.points)} pts</div>
+            <div style="color:var(--text-muted);font-size:13px">S${bestGame.season} W${bestGame.week}, playing for ${ownerLink(bestGame.owner, ownerMap[bestGame.owner]?.displayName || bestGame.owner)}</div>
+        </div>` : ""}
+    `;
+};
+
+// ---------------------------------------------------------------- Search bar
+function initSiteSearch() {
+    const input = document.getElementById("site-search");
+    const results = document.getElementById("search-results");
+    if (!input || !results) return;
+
+    let owners = null, playerIndex = null;
+    let debounceTimer = null;
+
+    async function ensureData() {
+        if (!owners) owners = await DDD.getOwners();
+        if (!playerIndex) playerIndex = await DDD.getPlayerIndex();
+    }
+
+    function render(query) {
+        const q = query.trim().toLowerCase();
+        if (!q) { results.classList.remove("open"); results.innerHTML = ""; return; }
+
+        const ownerMatches = owners.filter(o =>
+            o.displayName.toLowerCase().includes(q) || (o.nickname || "").toLowerCase().includes(q)
+        ).slice(0, 5);
+
+        const playerMatches = playerIndex.filter(p => p.player.toLowerCase().includes(q))
+            .sort((a, b) => b.totalPoints - a.totalPoints)
+            .slice(0, 8);
+
+        if (!ownerMatches.length && !playerMatches.length) {
+            results.innerHTML = `<div style="padding:10px 12px;font-size:13px;color:var(--text-muted)">No matches</div>`;
+            results.classList.add("open");
+            return;
+        }
+
+        let html = "";
+        if (ownerMatches.length) {
+            html += `<div class="group-label">Owners</div>`;
+            html += ownerMatches.map(o => `<a href="#/teams/${o.slug}">${fmt.escapeHtml(o.displayName)}</a>`).join("");
+        }
+        if (playerMatches.length) {
+            html += `<div class="group-label">Players</div>`;
+            html += playerMatches.map(p => `<a href="#/player/${encodeURIComponent(p.player)}">${fmt.escapeHtml(p.player)} <span class="muted">(${fmt.escapeHtml(p.position)}, ${fmt.pts(p.totalPoints)} pts)</span></a>`).join("");
+        }
+        results.innerHTML = html;
+        results.classList.add("open");
+    }
+
+    input.addEventListener("input", () => {
+        clearTimeout(debounceTimer);
+        const q = input.value;
+        debounceTimer = setTimeout(async () => {
+            await ensureData();
+            render(q);
+        }, 120);
+    });
+
+    input.addEventListener("focus", async () => {
+        await ensureData();
+        if (input.value.trim()) render(input.value);
+    });
+
+    document.addEventListener("click", (e) => {
+        if (!results.contains(e.target) && e.target !== input) {
+            results.classList.remove("open");
+        }
+    });
+
+    results.addEventListener("click", () => {
+        results.classList.remove("open");
+        input.value = "";
+    });
+}
