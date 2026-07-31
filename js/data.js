@@ -41,6 +41,7 @@ const DDD = (function () {
         getTransactions: () => loadJSON("transactions.json"),
         getPlayerIndex: () => loadJSON("player-index.json"),
         getDraftRetrospective: () => loadJSON("draft-retrospective.json").catch(() => []),
+        getSchedule: () => loadJSON("schedule.json").catch(() => []),
         getBoxscores: (season) => loadJSON(`boxscores/${season}.json`),
 
         // ---- convenience lookups, built lazily ----

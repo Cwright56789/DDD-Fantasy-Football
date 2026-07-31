@@ -118,6 +118,7 @@ function Export-SheetToJson {
 
 Export-SheetToJson -SheetName "AllMatchups" -OutFile "all-matchups.json"
 Export-SheetToJson -SheetName "AllBoxscores" -OutFile "all-boxscores.json"
+Export-SheetToJson -SheetName "CurrentSeasonMatchups" -OutFile "current-season-matchups.json"
 
 function Get-SingleCellValue([string]$sheetName, [string]$cellRef) {
     $sheetNum = $sheetNameToNum[$sheetName]

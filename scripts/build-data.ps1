@@ -47,6 +47,47 @@ foreach ($m in $rawMatchups) {
 if ($byeRowCount -gt 0) { Write-Host "  $byeRowCount playoff-bye rows (counted for the home side only)" }
 if ($droppedRowCount -gt 0) { Write-Host "  skipped $droppedRowCount blank placeholder rows" }
 
+# Full current-season schedule including not-yet-played future weeks (used
+# for rest-of-season simulation) -- separate from $matchups above, which only
+# ever holds real, decided results.
+$schedule = New-Object System.Collections.Generic.List[object]
+$schedulePath = Join-Path $RawDir "current-season-matchups.json"
+if (Test-Path $schedulePath) {
+    Write-Host "Normalizing current-season schedule..."
+    $rawSchedule = Get-Content $schedulePath -Raw | ConvertFrom-Json
+    $currentSeasonPlayedCount = 0
+    foreach ($m in $rawSchedule) {
+        if (-not $m."Home Owner" -or -not $m."Away Owner") { continue } # bye/blank rows not relevant to scheduling
+        $played = ($m."Weekly Matchup Winner" -ne "UNDECIDED")
+        $schedule.Add([pscustomobject]@{
+            season = [int]$m.Season
+            week = [int]$m.Week
+            awayOwner = ConvertTo-OwnerSlug $m."Away Owner"
+            homeOwner = ConvertTo-OwnerSlug $m."Home Owner"
+            played = $played
+        })
+        # Once a current-season game is actually decided, it needs to show up
+        # everywhere $matchups drives (standings, luck, matchups page, etc.),
+        # not just in the schedule used for simulation.
+        if ($played) {
+            $currentSeasonPlayedCount++
+            $matchups.Add([pscustomobject]@{
+                season = [int]$m.Season
+                week = [int]$m.Week
+                game = 0
+                awayTeam = $m."Away Team"
+                awayOwner = ConvertTo-OwnerSlug $m."Away Owner"
+                awayPts = [double]$m."Away Team Points"
+                homeTeam = $m."Home Team"
+                homeOwner = ConvertTo-OwnerSlug $m."Home Owner"
+                homePts = [double]$m."Home Team Points"
+                winner = $m."Weekly Matchup Winner"
+            })
+        }
+    }
+    if ($currentSeasonPlayedCount -gt 0) { Write-Host "  $currentSeasonPlayedCount current-season games merged into matchups" }
+}
+
 Write-Host "Normalizing boxscores ($($rawBoxscores.Count) rows)..."
 $boxscores = New-Object System.Collections.Generic.List[object]
 $emptySlotCount = 0
@@ -192,6 +233,11 @@ $allSeasons = @($matchups | ForEach-Object { $_.season } | Sort-Object -Unique)
 # ---- matchups.json ----
 Write-Host "Writing matchups.json..."
 $matchups | ConvertTo-Json -Depth 4 -Compress | Set-Content -Path (Join-Path $OutDir "matchups.json") -Encoding utf8
+
+if ($schedule.Count -gt 0) {
+    Write-Host "Writing schedule.json..."
+    $schedule | ConvertTo-Json -Depth 4 -Compress | Set-Content -Path (Join-Path $OutDir "schedule.json") -Encoding utf8
+}
 
 # ---- boxscores/{season}.json ----
 Write-Host "Writing per-season boxscore files..."

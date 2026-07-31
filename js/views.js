@@ -582,6 +582,131 @@ Views.playoffs = async function (root, params) {
     `;
 };
 
+// ---------------------------------------------------------------- Playoff Odds (Monte Carlo)
+function ownerScorePool(matchups, owner) {
+    const pool = [];
+    matchups.forEach(m => {
+        if (m.awayOwner === owner && m.awayPts != null) pool.push(m.awayPts);
+        if (m.homeOwner === owner && m.homePts != null) pool.push(m.homePts);
+    });
+    return pool;
+}
+
+function simulatePlayoffOdds(matchups, schedule, season, owners, iterations = 5000) {
+    const regRows = matchups.filter(m => m.season === season && m.week <= REGULAR_SEASON_WEEKS);
+    const remaining = schedule.filter(s => s.season === season && !s.played && s.week <= REGULAR_SEASON_WEEKS);
+
+    const baseAcc = {};
+    owners.forEach(o => { baseAcc[o.slug] = { wins: 0, losses: 0, ties: 0, points: 0 }; });
+    regRows.forEach(m => {
+        [["awayOwner", "awayPts"], ["homeOwner", "homePts"]].forEach(([oKey, pKey]) => {
+            const owner = m[oKey];
+            if (!owner || !baseAcc[owner]) return;
+            baseAcc[owner].points += m[pKey];
+            const won = m.winner === (oKey === "awayOwner" ? "AWAY" : "HOME");
+            const tied = m.winner === "TIE";
+            if (tied) baseAcc[owner].ties++;
+            else if (won) baseAcc[owner].wins++;
+            else baseAcc[owner].losses++;
+        });
+    });
+
+    // Each owner's own history of real weekly scores (all seasons, plus any
+    // games already decided this season) becomes the pool we draw simulated
+    // scores from -- so a historically high-scoring team is simulated as one,
+    // rather than treating every matchup as a coin flip.
+    const pools = {};
+    owners.forEach(o => { pools[o.slug] = ownerScorePool(matchups, o.slug); });
+
+    const qualified = {}, winsSum = {}, seedSum = {};
+    owners.forEach(o => { qualified[o.slug] = 0; winsSum[o.slug] = 0; seedSum[o.slug] = 0; });
+
+    function samplePool(pool) {
+        if (!pool || pool.length === 0) return 100;
+        return pool[Math.floor(Math.random() * pool.length)];
+    }
+
+    for (let i = 0; i < iterations; i++) {
+        const acc = {};
+        owners.forEach(o => { acc[o.slug] = { ...baseAcc[o.slug] }; });
+
+        remaining.forEach(g => {
+            const homeScore = samplePool(pools[g.homeOwner]);
+            const awayScore = samplePool(pools[g.awayOwner]);
+            acc[g.homeOwner].points += homeScore;
+            acc[g.awayOwner].points += awayScore;
+            if (homeScore > awayScore) { acc[g.homeOwner].wins++; acc[g.awayOwner].losses++; }
+            else if (awayScore > homeScore) { acc[g.awayOwner].wins++; acc[g.homeOwner].losses++; }
+            else { acc[g.homeOwner].ties++; acc[g.awayOwner].ties++; }
+        });
+
+        const rows = Object.keys(acc).map(slug => ({ slug, ...acc[slug] }))
+            .sort((a, b) => (b.wins - a.wins) || (b.points - a.points));
+        rows.forEach((r, idx) => {
+            const seed = idx + 1;
+            seedSum[r.slug] += seed;
+            winsSum[r.slug] += r.wins;
+            if (seed <= PLAYOFF_TEAM_COUNT) qualified[r.slug]++;
+        });
+    }
+
+    return owners.map(o => ({
+        owner: o.slug,
+        currentWins: baseAcc[o.slug].wins,
+        currentLosses: baseAcc[o.slug].losses,
+        currentTies: baseAcc[o.slug].ties,
+        currentPoints: baseAcc[o.slug].points,
+        odds: qualified[o.slug] / iterations,
+        avgWins: winsSum[o.slug] / iterations,
+        avgSeed: seedSum[o.slug] / iterations
+    })).sort((a, b) => (b.odds - a.odds) || (b.avgWins - a.avgWins));
+}
+
+Views.playoffOdds = async function (root) {
+    const [meta, matchups, schedule, owners] = await Promise.all([
+        DDD.getMeta(), DDD.getMatchups(), DDD.getSchedule(), DDD.getOwners()
+    ]);
+    const ownerMap = {}; owners.forEach(o => ownerMap[o.slug] = o);
+    const season = meta.currentSeason;
+
+    if (!schedule.length) {
+        root.innerHTML = `<div class="card"><h2>📈 Playoff Odds</h2><p class="empty-state">Schedule data isn't available yet for ${season}.</p></div>`;
+        return;
+    }
+
+    const remainingCount = schedule.filter(s => s.season === season && !s.played && s.week <= REGULAR_SEASON_WEEKS).length;
+    const results = simulatePlayoffOdds(matchups, schedule, season, owners, 5000);
+
+    root.innerHTML = `
+        <div class="card">
+            <h2>📈 Playoff Odds &mdash; ${season}</h2>
+            <p style="color:var(--text-muted);font-size:13px">
+                ${remainingCount > 0
+                    ? `Estimated by simulating the remaining ${remainingCount} regular-season game${remainingCount === 1 ? "" : "s"} 5,000 times. Each simulated game draws a random score for each team from that team's own history of real scores (all seasons, plus any games already played this season) rather than treating every matchup as a coin flip &mdash; but small sample sizes, especially early in a season or for teams with limited history, mean these are rough statistical estimates, not guarantees.`
+                    : `The ${season} regular season is complete, so these are the final, decided outcomes &mdash; no simulation involved.`}
+            </p>
+        </div>
+        <div class="card">
+            <table class="data">
+                <thead><tr><th>Seed</th><th>Team</th><th>Record</th><th>Points For</th><th>Playoff Odds</th><th>Avg. Final Wins</th><th>Avg. Seed</th></tr></thead>
+                <tbody>
+                    ${results.map((r, i) => `
+                        <tr style="${i < PLAYOFF_TEAM_COUNT ? "font-weight:600" : ""}">
+                            <td>${i + 1}</td>
+                            <td>${ownerLine(r.owner, ownerMap)}</td>
+                            <td>${fmt.record(r.currentWins, r.currentLosses, r.currentTies)}</td>
+                            <td>${fmt.pts(r.currentPoints)}</td>
+                            <td>${r.odds >= 0.999 ? "Clinched" : r.odds <= 0.001 ? "Eliminated" : fmt.pct(r.odds)}</td>
+                            <td>${r.avgWins.toFixed(1)}</td>
+                            <td>${r.avgSeed.toFixed(1)}</td>
+                        </tr>
+                    `).join("")}
+                </tbody>
+            </table>
+        </div>
+    `;
+};
+
 // ---------------------------------------------------------------- Draft Retrospective
 Views.draft = async function (root, params) {
     const [meta, owners, allPicks] = await Promise.all([DDD.getMeta(), DDD.getOwners(), DDD.getDraftRetrospective()]);
