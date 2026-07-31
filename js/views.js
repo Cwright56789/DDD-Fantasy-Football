@@ -860,6 +860,91 @@ Views._statsPositions = async function (root) {
     root.innerHTML = sections;
 };
 
+// ---------------------------------------------------------------- Rivalries
+const RIVAL_PAIRS = [
+    ["charlie-wright", "pat-elliott"],
+    ["michael-cole", "tommy-alexander"],
+    ["brooks-rush", "noah-jordan"],
+    ["tommy-denlinger", "patrick-culcasi"],
+    ["greg-nieskens", "carter-davis"],
+    ["kyle-roche", "will-samuel"]
+];
+
+function rivalryLookup(h2h, ownerA, ownerB) {
+    const rec = h2h.find(p => (p.ownerA === ownerA && p.ownerB === ownerB) || (p.ownerA === ownerB && p.ownerB === ownerA));
+    if (!rec) return null;
+    if (rec.ownerA === ownerA) return { aWins: rec.aWins, bWins: rec.bWins, ties: rec.ties, aPoints: rec.aPoints, bPoints: rec.bPoints, games: rec.games };
+    return { aWins: rec.bWins, bWins: rec.aWins, ties: rec.ties, aPoints: rec.bPoints, bPoints: rec.aPoints, games: rec.games };
+}
+
+Views.rivalry = async function (root, params) {
+    const [pairA, pairB] = (params[0] || "").split("_vs_");
+    const [owners, h2h, matchups] = await Promise.all([DDD.getOwners(), DDD.getHeadToHead(), DDD.getMatchups()]);
+    const ownerMap = {}; owners.forEach(o => ownerMap[o.slug] = o);
+
+    if (!pairA || !pairB || !ownerMap[pairA] || !ownerMap[pairB]) {
+        root.innerHTML = `<p class="empty-state">Rivalry not found.</p>`;
+        return;
+    }
+
+    const rec = rivalryLookup(h2h, pairA, pairB) || { aWins: 0, bWins: 0, ties: 0, aPoints: 0, bPoints: 0, games: 0 };
+    const games = matchups.filter(m =>
+        (m.awayOwner === pairA && m.homeOwner === pairB) || (m.awayOwner === pairB && m.homeOwner === pairA)
+    ).sort((a, b) => (b.season - a.season) || (b.week - a.week));
+
+    const withMargin = games.map(m => {
+        const aPts = m.awayOwner === pairA ? m.awayPts : m.homePts;
+        const bPts = m.awayOwner === pairA ? m.homePts : m.awayPts;
+        return { ...m, aPts, bPts, margin: aPts - bPts };
+    });
+    const biggestBlowout = [...withMargin].sort((a, b) => Math.abs(b.margin) - Math.abs(a.margin))[0];
+    const closest = [...withMargin].sort((a, b) => Math.abs(a.margin) - Math.abs(b.margin))[0];
+
+    function gameRow(m) {
+        const aWon = m.margin > 0, bWon = m.margin < 0;
+        return `<tr>
+            <td class="left">S${m.season} W${m.week}</td>
+            <td style="font-weight:${aWon ? 700 : 400}">${fmt.pts(m.aPts)}</td>
+            <td style="font-weight:${bWon ? 700 : 400}">${fmt.pts(m.bPts)}</td>
+            <td>${fmt.signed(m.margin)}</td>
+        </tr>`;
+    }
+
+    const oA = ownerMap[pairA], oB = ownerMap[pairB];
+    root.innerHTML = `
+        <div class="card">
+            <h2>🔥 ${fmt.escapeHtml(oA.displayName)} vs ${fmt.escapeHtml(oB.displayName)}</h2>
+            <div class="grid cols-3">
+                <div class="stat-tile"><div class="value">${rec.aWins}-${rec.bWins}${rec.ties ? "-" + rec.ties : ""}</div><div class="label">${fmt.escapeHtml(oA.displayName)}'s record</div></div>
+                <div class="stat-tile"><div class="value">${rec.games}</div><div class="label">All-time meetings</div></div>
+                <div class="stat-tile"><div class="value">${fmt.pts(rec.aPoints)} - ${fmt.pts(rec.bPoints)}</div><div class="label">Total points</div></div>
+            </div>
+        </div>
+        <div class="grid cols-2">
+            ${biggestBlowout ? `<div class="card">
+                <h3>Biggest Blowout</h3>
+                <div style="font-size:20px;font-weight:800">${fmt.signed(biggestBlowout.margin)}</div>
+                <div style="color:var(--text-muted);font-size:13px">S${biggestBlowout.season} W${biggestBlowout.week}: ${fmt.pts(biggestBlowout.aPts)} - ${fmt.pts(biggestBlowout.bPts)}</div>
+            </div>` : ""}
+            ${closest ? `<div class="card">
+                <h3>Closest Game</h3>
+                <div style="font-size:20px;font-weight:800">${fmt.signed(closest.margin)}</div>
+                <div style="color:var(--text-muted);font-size:13px">S${closest.season} W${closest.week}: ${fmt.pts(closest.aPts)} - ${fmt.pts(closest.bPts)}</div>
+            </div>` : ""}
+        </div>
+        <div class="card">
+            <h3>Full History</h3>
+            <div class="table-scroll">
+                <table class="data">
+                    <thead><tr><th class="left">Week</th><th>${fmt.escapeHtml(oA.displayName)}</th><th>${fmt.escapeHtml(oB.displayName)}</th><th>Margin</th></tr></thead>
+                    <tbody>${games.length ? withMargin.map(gameRow).join("") : `<tr><td colspan="4" class="left">No meetings yet.</td></tr>`}</tbody>
+                </table>
+            </div>
+        </div>
+        <p><a href="#/h2h">← All rivalries</a></p>
+    `;
+};
+
 // ---------------------------------------------------------------- Head-to-Head
 Views.h2h = async function (root) {
     const [owners, h2h] = await Promise.all([DDD.getOwners(), DDD.getHeadToHead()]);
@@ -890,7 +975,19 @@ Views.h2h = async function (root) {
         return `<tr><th class="left">${fmt.escapeHtml(shortName(rOwner))}</th>${cells}</tr>`;
     }).join("");
 
+    const rivalryCards = RIVAL_PAIRS.map(([a, b]) => {
+        const rec = rivalryLookup(h2h, a, b) || { aWins: 0, bWins: 0, ties: 0 };
+        const oa = owners.find(o => o.slug === a), ob = owners.find(o => o.slug === b);
+        return `<a class="owner-card" href="#/rivalry/${a}_vs_${b}">
+            <div class="name" style="font-size:15px">${fmt.escapeHtml(oa?.displayName || a)}<br>vs<br>${fmt.escapeHtml(ob?.displayName || b)}</div>
+            <div class="mini-record">${rec.aWins}-${rec.bWins}${rec.ties ? "-" + rec.ties : ""} all-time</div>
+        </a>`;
+    }).join("");
+
     root.innerHTML = `
+        <div class="section-title">🔥 Rivalries</div>
+        <div class="grid cols-3">${rivalryCards}</div>
+
         <div class="card">
             <h2>Head-to-Head (All-Time)</h2>
             <p style="color:var(--text-muted);font-size:13px">Row's record vs. Column, regular season matchups, all seasons combined.</p>

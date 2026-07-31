@@ -8,7 +8,8 @@ const routes = {
     "transactions": Views.transactions,
     "stats": Views.stats,
     "h2h": Views.h2h,
-    "player": Views.player
+    "player": Views.player,
+    "rivalry": Views.rivalry
 };
 
 function parseHash() {
