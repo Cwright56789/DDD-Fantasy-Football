@@ -108,6 +108,38 @@ foreach ($b in $rawBoxscores) {
 }
 if ($emptySlotCount -gt 0) { Write-Host "  skipped $emptySlotCount empty roster-slot rows" }
 
+# Merge already-played current-season player boxscores (from the same
+# CurrentSeasonBoxscores query that backs the schedule above) into $boxscores,
+# same reasoning as the matchups merge -- otherwise lineup efficiency,
+# positional leaders, bench mistakes, and player search would stay frozen and
+# never pick up 2026 once games start.
+$playedWeeks = @{}
+foreach ($s in $schedule) { if ($s.played) { $playedWeeks["$($s.season)|$($s.week)"] = $true } }
+$currentBoxscoresPath = Join-Path $RawDir "current-season-boxscores.json"
+if ((Test-Path $currentBoxscoresPath) -and $playedWeeks.Count -gt 0) {
+    Write-Host "Merging current-season boxscores for played weeks..."
+    $rawCurrentBoxscores = Get-Content $currentBoxscoresPath -Raw | ConvertFrom-Json
+    $mergedBoxscoreCount = 0
+    foreach ($b in $rawCurrentBoxscores) {
+        if (-not $b.Player) { continue }
+        if (-not $playedWeeks.ContainsKey("$([int]$b.Season)|$([int]$b.Week)")) { continue }
+        $boxscores.Add([pscustomobject]@{
+            season = [int]$b.Season
+            week = [int]$b.Week
+            team = $b.Team
+            owner = ConvertTo-OwnerSlug $b.Owner
+            homeAway = $b."Home/Away"
+            player = $b.Player
+            position = $b.Position
+            slot = $b.Slot
+            points = [double]$b.Points
+            projectedPoints = if ($null -ne $b.ProjectedPoints) { [double]$b.ProjectedPoints } else { $null }
+        })
+        $mergedBoxscoreCount++
+    }
+    if ($mergedBoxscoreCount -gt 0) { Write-Host "  $mergedBoxscoreCount current-season boxscore rows merged" }
+}
+
 Write-Host "Computing team-week scores..."
 $teamWeekScores = New-TeamWeekScores -Matchups $matchups
 
