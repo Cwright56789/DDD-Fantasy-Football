@@ -398,6 +398,60 @@ Views.teamProfile = async function (root, params) {
 };
 
 // ---------------------------------------------------------------- Matchups
+function ownerLine(slug, ownerMap) { return ownerLink(slug, ownerMap[slug]?.displayName || slug); }
+
+async function weeklyAwardsHtml(season, week, games, ownerMap) {
+    if (!games.length) return "";
+    const [luck, lineupEfficiency, mistakesLookup] = await Promise.all([DDD.getLuck(), DDD.getLineupEfficiency(), buildMistakesLookup(season)]);
+
+    const weekTeams = [];
+    games.forEach(m => {
+        weekTeams.push({ owner: m.awayOwner, points: m.awayPts, opp: m.homeOwner, oppPoints: m.homePts, result: m.winner === "AWAY" ? "W" : m.winner === "HOME" ? "L" : "T" });
+        weekTeams.push({ owner: m.homeOwner, points: m.homePts, opp: m.awayOwner, oppPoints: m.awayPts, result: m.winner === "HOME" ? "W" : m.winner === "AWAY" ? "L" : "T" });
+    });
+
+    const topScore = [...weekTeams].sort((a, b) => b.points - a.points)[0];
+    const lowScore = [...weekTeams].sort((a, b) => a.points - b.points)[0];
+
+    const weekEff = lineupEfficiency.filter(r => r.season === season && r.week === week);
+    const bestEff = [...weekEff].sort((a, b) => b.efficiencyPct - a.efficiencyPct)[0];
+
+    const weekLuck = luck.weekly.filter(r => r.season === season && r.week === week);
+    const luckiestWin = [...weekLuck].filter(r => r.result === "W").sort((a, b) => a.expectedWinPct - b.expectedWinPct)[0];
+    const unluckiestLoss = [...weekLuck].filter(r => r.result === "L").sort((a, b) => b.expectedWinPct - a.expectedWinPct)[0];
+
+    const mistakesThisWeek = Object.values(mistakesLookup).filter(m => m.week === week);
+    const worstMistake = [...mistakesThisWeek].sort((a, b) => b.pointsCost - a.pointsCost)[0];
+
+    const withMargin = games.map(m => ({ ...m, margin: Math.abs(m.awayPts - m.homePts) }));
+    const closest = [...withMargin].sort((a, b) => a.margin - b.margin)[0];
+    const blowout = [...withMargin].sort((a, b) => b.margin - a.margin)[0];
+
+    function tile(icon, label, value, sub) {
+        return `<div class="stat-tile" style="text-align:left;border:1px solid var(--border);border-radius:8px">
+            <div class="label" style="margin-top:0">${icon} ${label}</div>
+            <div class="value" style="font-size:18px">${value}</div>
+            <div style="font-size:12px;color:var(--text-muted)">${sub}</div>
+        </div>`;
+    }
+
+    const tiles = [
+        topScore ? tile("📈", "Top Score", fmt.pts(topScore.points), ownerLine(topScore.owner, ownerMap)) : "",
+        lowScore ? tile("📉", "Low Score", fmt.pts(lowScore.points), ownerLine(lowScore.owner, ownerMap)) : "",
+        bestEff ? tile("🎯", "Manager of the Week", fmt.pct(bestEff.efficiencyPct, 0), ownerLine(bestEff.owner, ownerMap)) : "",
+        luckiestWin ? tile("🍀", "Luckiest Win", fmt.pct(luckiestWin.expectedWinPct, 0) + " exp.", ownerLine(luckiestWin.owner, ownerMap)) : "",
+        unluckiestLoss ? tile("💀", "Unluckiest Loss", fmt.pct(unluckiestLoss.expectedWinPct, 0) + " exp.", ownerLine(unluckiestLoss.owner, ownerMap)) : "",
+        worstMistake ? tile("🪑", "Worst Bench Mistake", "+" + fmt.pts(worstMistake.pointsCost), `${ownerLine(worstMistake.owner, ownerMap)}: benched ${fmt.escapeHtml(worstMistake.benchedPlayer)}`) : "",
+        closest ? tile("⚡", "Closest Game", fmt.pts(closest.margin), `${ownerLine(closest.awayOwner, ownerMap)} vs ${ownerLine(closest.homeOwner, ownerMap)}`) : "",
+        blowout ? tile("💥", "Biggest Blowout", fmt.pts(blowout.margin), `${ownerLine(blowout.awayOwner, ownerMap)} vs ${ownerLine(blowout.homeOwner, ownerMap)}`) : ""
+    ].join("");
+
+    return `<div class="card">
+        <h3>🏅 Week ${week} Awards</h3>
+        <div class="grid cols-4">${tiles}</div>
+    </div>`;
+}
+
 Views.matchups = async function (root, params) {
     const [meta, matchups, owners] = await Promise.all([DDD.getMeta(), DDD.getMatchups(), DDD.getOwners()]);
     const ownerMap = {}; owners.forEach(o => ownerMap[o.slug] = o);
@@ -411,6 +465,7 @@ Views.matchups = async function (root, params) {
         .sort((a, b) => a.game - b.game);
 
     const mistakesLookup = games.length ? await buildMistakesLookup(season) : null;
+    const awardsHtml = await weeklyAwardsHtml(season, week, games, ownerMap);
 
     root.innerHTML = `
         <div class="card">
@@ -420,6 +475,7 @@ Views.matchups = async function (root, params) {
                 <select id="week-select">${weeksForSeason.map(w => `<option value="${w}" ${w === week ? "selected" : ""}>Week ${w}</option>`).join("")}</select>
             </div>
         </div>
+        ${awardsHtml}
         <div id="matchup-list">
             ${games.length ? games.map(m => matchupCard(m, ownerMap, { mistakesLookup })).join("") : `<p class="empty-state">No games this week.</p>`}
         </div>
