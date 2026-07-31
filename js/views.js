@@ -646,6 +646,7 @@ Views._transactionsTrades = function (root, tx, ownerMap, selected) {
 Views.stats = async function (root, params) {
     const tab = params[0] || "luck";
     const tabs = [
+        ["power", "Power Rankings"],
         ["luck", "Luck"],
         ["efficiency", "Lineup Efficiency"],
         ["bench", "Bench"],
@@ -662,11 +663,125 @@ Views.stats = async function (root, params) {
         <div id="stats-body"><div class="spinner-text">Loading...</div></div>
     `;
     const body = document.getElementById("stats-body");
-    if (tab === "luck") await Views._statsLuck(body, params.slice(1));
+    if (tab === "power") await Views._statsPower(body, params.slice(1));
+    else if (tab === "luck") await Views._statsLuck(body, params.slice(1));
     else if (tab === "efficiency") await Views._statsEfficiency(body, params.slice(1));
     else if (tab === "bench") await Views._statsBench(body, params.slice(1));
     else if (tab === "projections") await Views._statsProjections(body, params.slice(1));
     else await Views._statsPositions(body, params.slice(1));
+};
+
+function percentileRank(rows, keyFn) {
+    // returns a Map from row -> 0..1 percentile (higher key value = higher percentile)
+    const sorted = [...rows].sort((a, b) => keyFn(a) - keyFn(b));
+    const map = new Map();
+    sorted.forEach((r, i) => map.set(r, rows.length > 1 ? i / (rows.length - 1) : 1));
+    return map;
+}
+
+Views._statsPower = async function (root, params) {
+    const [meta, owners, matchups, lineupEfficiency] = await Promise.all([
+        DDD.getMeta(), DDD.getOwners(), DDD.getMatchups(), DDD.getLineupEfficiency()
+    ]);
+    const ownerMap = {}; owners.forEach(o => ownerMap[o.slug] = o);
+
+    const seasonOptions = [...meta.seasons].sort((a, b) => b - a);
+    const season = Number(params[0]) || (matchups.some(m => m.season === meta.currentSeason) ? meta.currentSeason : seasonOptions[0]);
+    const seasonMatchups = matchups.filter(m => m.season === season);
+    const weeksForSeason = [...new Set(seasonMatchups.map(m => m.week))].sort((a, b) => a - b);
+    const week = Number(params[1]) || (weeksForSeason.includes(meta.currentWeek) ? meta.currentWeek : weeksForSeason[weeksForSeason.length - 1]);
+
+    // team-week rows for this season (owner, week, points, result)
+    const teamWeeks = [];
+    seasonMatchups.forEach(m => {
+        if (m.awayOwner) teamWeeks.push({ owner: m.awayOwner, week: m.week, points: m.awayPts, result: m.winner === "AWAY" ? "W" : m.winner === "HOME" ? "L" : "T" });
+        teamWeeks.push({ owner: m.homeOwner, week: m.week, points: m.homePts, result: m.winner === "HOME" ? "W" : m.winner === "AWAY" ? "L" : "T" });
+    });
+
+    const effByOwnerWeek = {};
+    lineupEfficiency.filter(r => r.season === season).forEach(r => { effByOwnerWeek[`${r.owner}|${r.week}`] = r.efficiencyPct; });
+
+    function computeForWeek(w) {
+        const through = teamWeeks.filter(t => t.week <= w);
+        const byOwner = {};
+        through.forEach(t => {
+            if (!byOwner[t.owner]) byOwner[t.owner] = { points: [], wins: 0, games: 0, effs: [] };
+            const b = byOwner[t.owner];
+            b.points.push(t.points);
+            b.games++;
+            if (t.result === "W") b.wins++;
+        });
+        // trailing-3 form + efficiency need per-week lookups
+        Object.keys(byOwner).forEach(owner => {
+            const rowsForOwner = through.filter(t => t.owner === owner).sort((a, b) => a.week - b.week);
+            const trailing = rowsForOwner.slice(-3);
+            byOwner[owner].recentForm = trailing.reduce((s, r) => s + r.points, 0) / trailing.length;
+            const effs = rowsForOwner.map(r => effByOwnerWeek[`${owner}|${r.week}`]).filter(v => v !== undefined);
+            byOwner[owner].avgEff = effs.length ? effs.reduce((s, v) => s + v, 0) / effs.length : null;
+        });
+
+        const rows = Object.keys(byOwner).map(owner => {
+            const b = byOwner[owner];
+            return {
+                owner,
+                pointsPerGame: b.points.reduce((s, p) => s + p, 0) / b.games,
+                winPct: b.wins / b.games,
+                recentForm: b.recentForm,
+                avgEff: b.avgEff
+            };
+        });
+
+        const ppgRank = percentileRank(rows, r => r.pointsPerGame);
+        const winRank = percentileRank(rows, r => r.winPct);
+        const formRank = percentileRank(rows, r => r.recentForm);
+        const effRank = percentileRank(rows, r => r.avgEff === null ? 0 : r.avgEff);
+
+        rows.forEach(r => {
+            r.score = 100 * (0.40 * ppgRank.get(r) + 0.30 * winRank.get(r) + 0.20 * formRank.get(r) + 0.10 * effRank.get(r));
+        });
+        rows.sort((a, b) => b.score - a.score);
+        rows.forEach((r, i) => r.rank = i + 1);
+        return rows;
+    }
+
+    const current = computeForWeek(week);
+    const prevWeekNum = weeksForSeason[weeksForSeason.indexOf(week) - 1];
+    const prevRanks = {};
+    if (prevWeekNum) computeForWeek(prevWeekNum).forEach(r => { prevRanks[r.owner] = r.rank; });
+
+    root.innerHTML = `
+        <div class="card">
+            <div class="toolbar">
+                ${seasonOptions.map(s => `<button class="btn ${s === season ? "active" : ""}" onclick="location.hash='#/stats/power/${s}'">${s}</button>`).join("")}
+            </div>
+            <div class="toolbar">
+                ${weeksForSeason.map(w => `<button class="btn ${w === week ? "active" : ""}" onclick="location.hash='#/stats/power/${season}/${w}'">Week ${w}</button>`).join("")}
+            </div>
+            <p style="color:var(--text-muted);font-size:13px">A blended score (0-100) using season-to-date points/game (40%), win% (30%), trailing-3-week form (20%), and lineup efficiency (10%) &mdash; a truer read on team strength than the standings alone.</p>
+            <table class="data">
+                <thead><tr><th>#</th><th class="left">Team</th><th>Score</th><th>Pts/Gm</th><th>Win%</th><th>Last 3 Wks</th><th>Trend</th></tr></thead>
+                <tbody>${current.map(r => {
+                    const prev = prevRanks[r.owner];
+                    let trend = `<span style="color:var(--text-muted)">–</span>`;
+                    if (prev !== undefined) {
+                        const diff = prev - r.rank;
+                        if (diff > 0) trend = `<span style="color:var(--win)">▲ ${diff}</span>`;
+                        else if (diff < 0) trend = `<span style="color:var(--loss)">▼ ${Math.abs(diff)}</span>`;
+                        else trend = `<span style="color:var(--text-muted)">–</span>`;
+                    }
+                    return `<tr>
+                        <td>${r.rank}</td>
+                        <td class="left">${ownerLink(r.owner, ownerMap[r.owner]?.displayName || r.owner)}</td>
+                        <td><strong>${r.score.toFixed(1)}</strong></td>
+                        <td>${fmt.pts(r.pointsPerGame)}</td>
+                        <td>${fmt.pct(r.winPct, 0)}</td>
+                        <td>${fmt.pts(r.recentForm)}</td>
+                        <td>${trend}</td>
+                    </tr>`;
+                }).join("")}</tbody>
+            </table>
+        </div>
+    `;
 };
 
 Views._statsLuck = async function (root, params) {
