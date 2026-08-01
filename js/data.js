@@ -27,7 +27,13 @@ const DDD = (function () {
         return json;
     }
 
+    function clearCache() {
+        Object.keys(cache).forEach(k => delete cache[k]);
+        buildVersion = null;
+    }
+
     const api = {
+        clearCache,
         getMeta: () => loadJSON("meta.json"),
         getOwners: () => loadJSON("owners.json"),
         getStandings: () => loadJSON("standings.json"),

@@ -53,21 +53,43 @@ async function render() {
     window.scrollTo({ top: 0 });
 }
 
-async function initBanner() {
-    try {
-        const meta = await DDD.getMeta();
-        document.getElementById("league-full-name").textContent = meta.leagueName;
-        document.title = `${meta.leagueShortName} Fantasy Football`;
+let bannerMeta = null;
 
-        function paint() {
-            const el = document.getElementById("updated-banner-content");
-            el.innerHTML = `<span class="dot"></span>Data last updated <strong>${fmt.dateTime(meta.generatedAt)}</strong> (${fmt.relativeTime(meta.generatedAt)}) &middot; ${meta.currentSeason} Week ${meta.currentWeek}`;
-        }
-        paint();
-        setInterval(paint, 30000);
+function paintBanner() {
+    if (!bannerMeta) return;
+    const el = document.getElementById("updated-banner-content");
+    el.innerHTML = `<span class="dot"></span>Data last updated <strong>${fmt.dateTime(bannerMeta.generatedAt)}</strong> (${fmt.relativeTime(bannerMeta.generatedAt)}) &middot; ${bannerMeta.currentSeason} Week ${bannerMeta.currentWeek}`;
+}
+
+async function refreshBannerMeta() {
+    try {
+        bannerMeta = await DDD.getMeta();
+        document.getElementById("league-full-name").textContent = bannerMeta.leagueName;
+        document.title = `${bannerMeta.leagueShortName} Fantasy Football`;
+        paintBanner();
     } catch (err) {
         document.getElementById("updated-banner-content").textContent = "Could not load league data.";
         console.error(err);
+    }
+}
+
+async function initBanner() {
+    await refreshBannerMeta();
+    setInterval(paintBanner, 30000);
+}
+
+async function refreshData() {
+    const btn = document.getElementById("refresh-data-btn");
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = "Refreshing...";
+    DDD.clearCache();
+    try {
+        await refreshBannerMeta();
+        await render();
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
     }
 }
 
@@ -76,4 +98,5 @@ window.addEventListener("DOMContentLoaded", () => {
     initBanner();
     initSiteSearch();
     render();
+    document.getElementById("refresh-data-btn").addEventListener("click", refreshData);
 });

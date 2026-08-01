@@ -188,6 +188,12 @@ nav.tabs a.active { color: #fff; background: var(--accent); }
     display: inline-block; width: 7px; height: 7px; border-radius: 50%;
     background: var(--win); margin-right: 6px; vertical-align: 1px;
 }
+#updated-banner-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+#refresh-data-btn {
+    padding: 3px 10px; font-size: 12px; flex-shrink: 0;
+}
 
 main { padding: 20px 0 60px; min-height: 60vh; }
 
