@@ -250,7 +250,7 @@ function boxscoreTable(rows, awayOwner, homeOwner) {
     function side(owner) {
         const mine = rows.filter(r => r.owner === owner);
         mine.sort((a, b) => slotOrder.indexOf(a.slot) - slotOrder.indexOf(b.slot) || b.points - a.points);
-        return `<table class="data" style="font-size:12.5px">
+        return `<div class="table-scroll"><table class="data" style="font-size:12.5px">
             <thead><tr><th class="left">Slot</th><th class="left">Player</th><th class="left">Pos</th><th>Pts</th></tr></thead>
             <tbody>${mine.map(r => `<tr${r.slot === "Bench" ? ' style="opacity:.6"' : ""}>
                 <td class="left">${fmt.escapeHtml(r.slot)}</td>
@@ -258,7 +258,7 @@ function boxscoreTable(rows, awayOwner, homeOwner) {
                 <td class="left">${fmt.escapeHtml(r.position)}</td>
                 <td>${fmt.pts(r.points)}</td>
             </tr>`).join("")}</tbody>
-        </table>`;
+        </table></div>`;
     }
     return `<div class="grid cols-2">
         <div>${side(awayOwner)}</div>
@@ -795,7 +795,7 @@ Views.playoffOdds = async function (root) {
             </p>
         </div>
         <div class="card">
-            <table class="data">
+            <div class="table-scroll"><table class="data">
                 <thead><tr><th>Seed</th><th>Team</th><th>Record</th><th>Points For</th><th>Playoff Odds</th><th>Championship Odds</th><th>Avg. Final Wins</th><th>Avg. Seed</th></tr></thead>
                 <tbody>
                     ${results.map((r, i) => `
@@ -811,13 +811,13 @@ Views.playoffOdds = async function (root) {
                         </tr>
                     `).join("")}
                 </tbody>
-            </table>
+            </table></div>
         </div>
         ${sos.length ? `
         <div class="card">
             <h3>Remaining Strength of Schedule</h3>
             <p style="color:var(--text-muted);font-size:13px">Average historical points/game of each team's remaining opponents &mdash; higher means a harder stretch ahead.</p>
-            <table class="data">
+            <div class="table-scroll"><table class="data">
                 <thead><tr><th class="left">Team</th><th>Games Left</th><th>Avg. Opponent Pts/Gm</th></tr></thead>
                 <tbody>
                     ${sos.map(r => `
@@ -828,7 +828,7 @@ Views.playoffOdds = async function (root) {
                         </tr>
                     `).join("")}
                 </tbody>
-            </table>
+            </table></div>
         </div>` : ""}
     `;
 };
@@ -876,22 +876,22 @@ Views.draft = async function (root, params) {
         <div class="two-col">
             <div class="card">
                 <h3>💎 Best Value (Round 5+)</h3>
-                <table class="data"><thead><tr><th>Pick</th><th class="left">Player</th><th class="left">Owner</th><th>Pts</th></tr></thead>
+                <div class="table-scroll"><table class="data"><thead><tr><th>Pick</th><th class="left">Player</th><th class="left">Owner</th><th>Pts</th></tr></thead>
                     <tbody>${lateRoundSteals.map(p => pickRow(p, false)).join("")}</tbody>
-                </table>
+                </table></div>
             </div>
             <div class="card">
                 <h3>💩 Biggest Busts (Round 1-4)</h3>
-                <table class="data"><thead><tr><th>Pick</th><th class="left">Player</th><th class="left">Owner</th><th>Pts</th></tr></thead>
+                <div class="table-scroll"><table class="data"><thead><tr><th>Pick</th><th class="left">Player</th><th class="left">Owner</th><th>Pts</th></tr></thead>
                     <tbody>${earlyRoundBusts.map(p => pickRow(p, false)).join("")}</tbody>
-                </table>
+                </table></div>
             </div>
         </div>
         <div class="card">
             <h3>Best Pick Of Each Round</h3>
-            <table class="data"><thead><tr><th>Pick</th><th>Round</th><th class="left">Player</th><th class="left">Owner</th><th>Pts</th></tr></thead>
+            <div class="table-scroll"><table class="data"><thead><tr><th>Pick</th><th>Round</th><th class="left">Player</th><th class="left">Owner</th><th>Pts</th></tr></thead>
                 <tbody>${bestByRound.map(p => pickRow(p, true)).join("")}</tbody>
-            </table>
+            </table></div>
         </div>
         <div class="card">
             <h3>Full Draft Board</h3>
@@ -1229,7 +1229,7 @@ Views._statsPower = async function (root, params) {
                 ${weeksForSeason.map(w => `<button class="btn ${w === week ? "active" : ""}" onclick="location.hash='#/stats/power/${season}/${w}'">Week ${w}</button>`).join("")}
             </div>
             <p style="color:var(--text-muted);font-size:13px">A blended score (0-100) using season-to-date points/game (40%), win% (30%), trailing-3-week form (20%), and lineup efficiency (10%) &mdash; a truer read on team strength than the standings alone.</p>
-            <table class="data">
+            <div class="table-scroll"><table class="data">
                 <thead><tr><th>#</th><th class="left">Team</th><th>Score</th><th>Pts/Gm</th><th>Win%</th><th>Last 3 Wks</th><th>Trend</th></tr></thead>
                 <tbody>${current.map(r => {
                     const prev = prevRanks[r.owner];
@@ -1250,7 +1250,7 @@ Views._statsPower = async function (root, params) {
                         <td>${trend}</td>
                     </tr>`;
                 }).join("")}</tbody>
-            </table>
+            </table></div>
         </div>
     `;
 };
@@ -1436,14 +1436,14 @@ Views._statsPositions = async function (root) {
         return `<div class="card">
             <h3>${pos}</h3>
             ${bestSingleSeason ? `<p style="font-size:13px;color:var(--text-muted)">Best single season: <strong>${fmt.escapeHtml(bestSingleSeason.topPerformer)}</strong> (${fmt.escapeHtml(ownerMap[bestSingleSeason.owner]?.displayName || bestSingleSeason.owner)}, ${bestSingleSeason.topPerformerSeason}) — ${fmt.pts(bestSingleSeason.topPerformerPoints)} pts</p>` : ""}
-            <table class="data">
+            <div class="table-scroll"><table class="data">
                 <thead><tr><th class="left">Owner</th><th>All-Time Pts</th><th class="left">Top Player (best season)</th></tr></thead>
                 <tbody>${rows.map(r => `<tr>
                     <td class="left">${ownerLink(r.owner, ownerMap[r.owner]?.displayName || r.owner)}</td>
                     <td>${fmt.pts(r.totalHistoricalPoints)}</td>
                     <td class="left">${fmt.escapeHtml(r.topPerformer)} (${r.topPerformerSeason}, ${fmt.pts(r.topPerformerPoints)})</td>
                 </tr>`).join("")}</tbody>
-            </table>
+            </table></div>
         </div>`;
     }).join("");
 
@@ -1717,7 +1717,7 @@ Views.player = async function (root, params) {
         </div>
         <div class="card">
             <h2>Season Breakdown</h2>
-            <table class="data">
+            <div class="table-scroll"><table class="data">
                 <thead><tr><th class="left">Season</th><th class="left">Roster(s)</th><th>Games</th><th>Total Pts</th></tr></thead>
                 <tbody>${seasonRows.map(s => `<tr>
                     <td class="left">${s.season}</td>
@@ -1725,7 +1725,7 @@ Views.player = async function (root, params) {
                     <td>${s.games}</td>
                     <td><strong>${fmt.pts(s.points)}</strong></td>
                 </tr>`).join("")}</tbody>
-            </table>
+            </table></div>
         </div>
         ${bestGame ? `<div class="card">
             <h2>Best Game</h2>
