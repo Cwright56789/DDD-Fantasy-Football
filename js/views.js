@@ -622,13 +622,27 @@ Views.playoffs = async function (root, params) {
 };
 
 // ---------------------------------------------------------------- Playoff Odds (Monte Carlo)
-function ownerScorePool(matchups, owner) {
+// Rosters are redrafted every year, so a manager's score history from a prior
+// season isn't a great stand-in for this year's specific team. Each owner's
+// simulated scores are drawn only from THIS season's own decided games; the
+// only exception is before any games have been played yet this season, when
+// there's nothing else to go on, so it falls back to that owner's full
+// history as a neutral starting point until real current-season results exist.
+function ownerScorePool(matchups, owner, season) {
     const pool = [];
     matchups.forEach(m => {
+        if (m.season !== season) return;
         if (m.awayOwner === owner && m.awayPts != null) pool.push(m.awayPts);
         if (m.homeOwner === owner && m.homePts != null) pool.push(m.homePts);
     });
-    return pool;
+    if (pool.length > 0) return pool;
+
+    const fallback = [];
+    matchups.forEach(m => {
+        if (m.awayOwner === owner && m.awayPts != null) fallback.push(m.awayPts);
+        if (m.homeOwner === owner && m.homePts != null) fallback.push(m.homePts);
+    });
+    return fallback;
 }
 
 function samplePool(pool) {
@@ -689,7 +703,7 @@ function simulatePlayoffOdds(matchups, schedule, season, owners, iterations = 50
     // scores from -- so a historically high-scoring team is simulated as one,
     // rather than treating every matchup as a coin flip.
     const pools = {};
-    owners.forEach(o => { pools[o.slug] = ownerScorePool(matchups, o.slug); });
+    owners.forEach(o => { pools[o.slug] = ownerScorePool(matchups, o.slug, season); });
 
     const qualified = {}, winsSum = {}, seedSum = {}, championed = {};
     owners.forEach(o => { qualified[o.slug] = 0; winsSum[o.slug] = 0; seedSum[o.slug] = 0; championed[o.slug] = 0; });
@@ -766,6 +780,7 @@ Views.playoffOdds = async function (root) {
     }
 
     const remainingCount = schedule.filter(s => s.season === season && !s.played && s.week <= REGULAR_SEASON_WEEKS).length;
+    const anyCurrentSeasonData = matchups.some(m => m.season === season);
     const results = simulatePlayoffOdds(matchups, schedule, season, owners, 5000);
     const pools = {}; results.forEach(r => { pools[r.owner] = r.pool; });
     const sos = remainingCount > 0 ? remainingStrengthOfSchedule(schedule, season, pools) : [];
@@ -775,7 +790,7 @@ Views.playoffOdds = async function (root) {
             <h2>📈 Playoff &amp; Championship Odds &mdash; ${season}</h2>
             <p style="color:var(--text-muted);font-size:13px">
                 ${remainingCount > 0
-                    ? `Estimated by simulating the remaining ${remainingCount} regular-season game${remainingCount === 1 ? "" : "s"} 5,000 times, then playing out the league's actual 6-team playoff bracket (seeds 1-2 bye into the semis, 3v6 and 4v5 in round 1) on top of each simulated finish. Each simulated game draws a random score for each team from that team's own history of real scores (all seasons, plus any games already played this season) rather than treating every matchup as a coin flip &mdash; but small sample sizes, especially early in a season or for teams with limited history, mean these are rough statistical estimates, not guarantees.`
+                    ? `Estimated by simulating the remaining ${remainingCount} regular-season game${remainingCount === 1 ? "" : "s"} 5,000 times, then playing out the league's actual 6-team playoff bracket (seeds 1-2 bye into the semis, 3v6 and 4v5 in round 1) on top of each simulated finish. Each simulated game draws a random score for each team from ${anyCurrentSeasonData ? `that team's own <strong>${season} results so far</strong>` : `that team's history from prior seasons, since no ${season} games have been played yet`} &mdash; rosters get redrafted every year, so once real ${season} games exist, this intentionally ignores prior seasons' scores rather than blending them in. That also means these are rough estimates, not guarantees: early in the season, a team's whole projection can rest on just a game or two.`
                     : `The ${season} regular season is complete, so these are the final, decided outcomes &mdash; no simulation involved.`}
             </p>
         </div>
